@@ -1,10 +1,17 @@
-node_modules
-.env
-.idea/
+# Dependencies
 node_modules/
+
+# Environment files
+.env
+*.env
+
+# Build output
 dist/
-config/home-assistant_v2.db-wal
-*.db-wal
+build/
+
+# Logs
+*.log
+logs/
 
 # Home Assistant local runtime/config secrets
 config/.storage/
@@ -18,3 +25,13 @@ config/*.db-shm
 config/*.db-wal
 config/*.log
 config/*.log.*
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+
+# mistaken local file
+/git
