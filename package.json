@@ -1,0 +1,20 @@
+{
+  "name": "home-assistant-mcp-light-enterprise",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.15.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}

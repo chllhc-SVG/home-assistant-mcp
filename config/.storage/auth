@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "auth",
+  "data": {
+    "users": [
+      {
+        "id": "68aad668e16846db8c289725c3a06718",
+        "group_ids": [
+          "system-read-only"
+        ],
+        "is_owner": false,
+        "is_active": true,
+        "name": "Home Assistant Content",
+        "system_generated": true,
+        "local_only": false
+      },
+      {
+        "id": "816ef802e36744c7958a942d7495042d",
+        "group_ids": [
+          "system-admin"
+        ],
+        "is_owner": true,
+        "is_active": true,
+        "name": "陈汉林",
+        "system_generated": false,
+        "local_only": false
+      }
+    ],
+    "groups": [
+      {
+        "id": "system-admin",
+        "name": "Administrators"
+      },
+      {
+        "id": "system-users",
+        "name": "Users"
+      },
+      {
+        "id": "system-read-only",
+        "name": "Read Only"
+      }
+    ],
+    "credentials": [
+      {
+        "id": "af9ec2b6daff470483470097a67bbeaf",
+        "user_id": "816ef802e36744c7958a942d7495042d",
+        "auth_provider_type": "homeassistant",
+        "auth_provider_id": null,
+        "data": {
+          "username": "陈汉林"
+        }
+      }
+    ],
+    "refresh_tokens": [
+      {
+        "id": "e9d6963b6fdd4efd95d38eb025cd19b3",
+        "user_id": "68aad668e16846db8c289725c3a06718",
+        "client_id": null,
+        "client_name": null,
+        "client_icon": null,
+        "token_type": "system",
+        "created_at": "2026-06-29T15:21:39.500251+00:00",
+        "access_token_expiration": 1800.0,
+        "token": "08dd26ab4e05f14248dec9294222ec7b02c9f66f8d6fa0f2359ee18446196f1a0bce2552a8b3560497ab0d2ce408409ceec3c03ee04622cac472742801d7d172",
+        "jwt_key": "08573baa25d18cf1a487eb9215450c88f28ef21c56835158f3e9053b42b492ef73d26fe8f4e5429d3faded2dc1f584dcb9c2ef29f8cbcb8f18196def2341df6d",
+        "last_used_at": null,
+        "last_used_ip": null,
+        "expire_at": null,
+        "credential_id": null,
+        "version": "2026.6.4"
+      },
+      {
+        "id": "3e966ef605d64be6bec00fbad76da348",
+        "user_id": "816ef802e36744c7958a942d7495042d",
+        "client_id": null,
+        "client_name": "xiaoke-mcp-test",
+        "client_icon": null,
+        "token_type": "long_lived_access_token",
+        "created_at": "2026-06-29T15:27:17.376843+00:00",
+        "access_token_expiration": 315360000.0,
+        "token": "ae245a740e2f399340ee5bb58ca57b857fb44c8464d8bf3606b346b06c57514d5060edca13c658006dd8c1d7967428b55e75caafc6659816e9df70c09c7e7078",
+        "jwt_key": "112f9ad6b0e35db0028cc5fa649a2f5925c245cf489ff958492e4916ed36ca8ec2a3526c6a79123b6d117571fe18bc4d7005ad562cd7e2cde393078ed6c1c8a2",
+        "last_used_at": "2026-06-29T15:27:17.376904+00:00",
+        "last_used_ip": null,
+        "expire_at": null,
+        "credential_id": null,
+        "version": "2026.6.4"
+      },
+      {
+        "id": "e81588e12549496c904c4602412a34d6",
+        "user_id": "816ef802e36744c7958a942d7495042d",
+        "client_id": "http://localhost:8123/",
+        "client_name": null,
+        "client_icon": null,
+        "token_type": "normal",
+        "created_at": "2026-06-30T06:20:17.398869+00:00",
+        "access_token_expiration": 1800.0,
+        "token": "a8ec33117a4c4b93063ae810d826a00722cf6214dc167e6be5db25554ac1e3edc36c531903d111d77dd844dd26d742fb8c7847153faffdacfe06c2ce61d70d29",
+        "jwt_key": "26ff488d252a2018442445a9bac044151731e1a677be4231682422ad4b2cdee6248e534b580405ccf5e4d541d0bf2658844e72fef30641a3a6e76b8808396f0c",
+        "last_used_at": "2026-06-30T08:20:19.431167+00:00",
+        "last_used_ip": "172.19.0.1",
+        "expire_at": 1790583619.431167,
+        "credential_id": "af9ec2b6daff470483470097a67bbeaf",
+        "version": "2026.6.4"
+      }
+    ]
+  }
+}

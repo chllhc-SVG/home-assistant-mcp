@@ -1,0 +1,69 @@
+{
+  "lights": [
+    {
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "display_name": "开关左键",
+      "aliases": ["左键", "开关左键", "墙壁开关左键", "小米开关左键"],
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "domain": "switch",
+      "room": "5f_lounge",
+      "type": "switch",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "display_name": "开关右键",
+      "aliases": ["右键", "开关右键", "墙壁开关右键", "小米开关右键"],
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "domain": "switch",
+      "room": "5f_lounge",
+      "type": "switch",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
+      "device_id": "light_xiaomi_w2_8263_all_switch",
+      "display_name": "全部开关指示灯状态",
+      "aliases": ["全部开关指示灯", "全部指示灯", "开关全部指示灯"],
+      "entity_id": "light.xiaomi_w2_8263_all_switch",
+      "domain": "light",
+      "room": "5f_lounge",
+      "type": "light",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
+      "device_id": "light_xiaomi_w2_8263_left_switch",
+      "display_name": "左键指示灯状态",
+      "aliases": ["左键指示灯", "左开关指示灯", "左键灯"],
+      "entity_id": "light.xiaomi_w2_8263_left_switch",
+      "domain": "light",
+      "room": "5f_lounge",
+      "type": "light",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
+      "device_id": "light_xiaomi_w2_8263_right_switch",
+      "display_name": "右键指示灯状态",
+      "aliases": ["右键指示灯", "右开关指示灯", "右键灯"],
+      "entity_id": "light.xiaomi_w2_8263_right_switch",
+      "domain": "light",
+      "room": "5f_lounge",
+      "type": "light",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    }
+  ]
+}

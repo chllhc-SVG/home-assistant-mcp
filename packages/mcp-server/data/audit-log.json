@@ -1,0 +1,427 @@
+{
+  "records": [
+    {
+      "id": "req_1782810453100_solx9u",
+      "request_id": "req_1782810453100_solx9u",
+      "timestamp": "2026-06-30T09:07:33.100Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关右键",
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810451738_ouhwbz",
+      "request_id": "req_1782810451738_ouhwbz",
+      "timestamp": "2026-06-30T09:07:31.738Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关右键",
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810443674_450tee",
+      "request_id": "req_1782810443674_450tee",
+      "timestamp": "2026-06-30T09:07:23.674Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_right_switch"
+      },
+      "resolved_device": {
+        "display_name": "右键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_right_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "light_xiaomi_w2_8263_right_switch",
+      "entity_id": "light.xiaomi_w2_8263_right_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810440197_ps0gg4",
+      "request_id": "req_1782810440197_ps0gg4",
+      "timestamp": "2026-06-30T09:07:20.197Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_right_switch"
+      },
+      "resolved_device": {
+        "display_name": "右键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_right_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "light_xiaomi_w2_8263_right_switch",
+      "entity_id": "light.xiaomi_w2_8263_right_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810430325_g5viem",
+      "request_id": "req_1782810430325_g5viem",
+      "timestamp": "2026-06-30T09:07:10.325Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "resolved_device": {
+        "display_name": "左键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "light_xiaomi_w2_8263_left_switch",
+      "entity_id": "light.xiaomi_w2_8263_left_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810427096_hxxfnj",
+      "request_id": "req_1782810427096_hxxfnj",
+      "timestamp": "2026-06-30T09:07:07.096Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "resolved_device": {
+        "display_name": "左键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "light_xiaomi_w2_8263_left_switch",
+      "entity_id": "light.xiaomi_w2_8263_left_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810424209_9ee9kz",
+      "request_id": "req_1782810424209_9ee9kz",
+      "timestamp": "2026-06-30T09:07:04.209Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "resolved_device": {
+        "display_name": "左键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "light_xiaomi_w2_8263_left_switch",
+      "entity_id": "light.xiaomi_w2_8263_left_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810422089_c14we3",
+      "request_id": "req_1782810422089_c14we3",
+      "timestamp": "2026-06-30T09:07:02.089Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "resolved_device": {
+        "display_name": "左键指示灯状态",
+        "entity_id": "light.xiaomi_w2_8263_left_switch"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "light_xiaomi_w2_8263_left_switch",
+      "entity_id": "light.xiaomi_w2_8263_left_switch",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810410969_n9hf09",
+      "request_id": "req_1782810410969_n9hf09",
+      "timestamp": "2026-06-30T09:06:50.969Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关右键",
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810409286_mvio26",
+      "request_id": "req_1782810409286_mvio26",
+      "timestamp": "2026-06-30T09:06:49.286Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关右键",
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810406820_6bha7s",
+      "request_id": "req_1782810406820_6bha7s",
+      "timestamp": "2026-06-30T09:06:46.820Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关右键",
+        "entity_id": "switch.xiaomi_w2_8263_right_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_right_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810388040_xz32cg",
+      "request_id": "req_1782810388040_xz32cg",
+      "timestamp": "2026-06-30T09:06:28.040Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810383257_dgyaxl",
+      "request_id": "req_1782810383257_dgyaxl",
+      "timestamp": "2026-06-30T09:06:23.257Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810381474_1yvcjo",
+      "request_id": "req_1782810381474_1yvcjo",
+      "timestamp": "2026-06-30T09:06:21.474Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810377961_00p701",
+      "request_id": "req_1782810377961_00p701",
+      "timestamp": "2026-06-30T09:06:17.961Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782810077702_t22shs",
+      "request_id": "req_1782810077702_t22shs",
+      "timestamp": "2026-06-30T09:01:17.702Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782809992059_60umai",
+      "request_id": "req_1782809992059_60umai",
+      "timestamp": "2026-06-30T08:59:52.059Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782809890970_ycbabs",
+      "request_id": "req_1782809890970_ycbabs",
+      "timestamp": "2026-06-30T08:58:10.970Z",
+      "source": "mcp",
+      "tool_name": "turn_off_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "off"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "req_1782809877881_awrgsd",
+      "request_id": "req_1782809877881_awrgsd",
+      "timestamp": "2026-06-30T08:57:57.881Z",
+      "source": "mcp",
+      "tool_name": "turn_on_light",
+      "tool_args": {
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "resolved_device": {
+        "display_name": "开关左键",
+        "entity_id": "switch.xiaomi_w2_8263_left_switch_service"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+      "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+      "result_status": "success"
+    },
+    {
+      "id": "seed_1",
+      "request_id": "seed_req_1",
+      "timestamp": "2026-06-30T08:16:42.931Z",
+      "source": "web",
+      "tool_name": "turn_on_light",
+      "user_input": "seed",
+      "intent": "seed",
+      "resolved_device": {
+        "display_name": "客厅灯",
+        "entity_id": "light.living_room_main"
+      },
+      "tool_args": {
+        "entity_id": "light.living_room_main"
+      },
+      "result": {
+        "success": true,
+        "state_after": "on"
+      },
+      "duration_ms": 120,
+      "device_id": "light_living_room_main",
+      "entity_id": "light.living_room_main",
+      "result_status": "success"
+    }
+  ]
+}

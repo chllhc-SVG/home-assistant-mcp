@@ -1,0 +1,7 @@
+node_modules
+.env
+.idea/
+node_modules/
+dist/
+config/home-assistant_v2.db-wal
+*.db-wal
