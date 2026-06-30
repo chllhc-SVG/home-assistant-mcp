@@ -5,3 +5,16 @@ node_modules/
 dist/
 config/home-assistant_v2.db-wal
 *.db-wal
+
+# Home Assistant local runtime/config secrets
+config/.storage/
+config/.HA_VERSION
+config/.ha_run.lock
+config/secrets.yaml
+
+# Home Assistant database and logs
+config/*.db
+config/*.db-shm
+config/*.db-wal
+config/*.log
+config/*.log.*
