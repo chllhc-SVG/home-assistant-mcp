@@ -6,10 +6,9 @@ services:
     build:
       context: .
       dockerfile: packages/mcp-server/Dockerfile
+    env_file:
+      - ./.env
     environment:
-      HOME_ASSISTANT_BASE_URL: ${HOME_ASSISTANT_BASE_URL}
-      HOME_ASSISTANT_TOKEN: ${HOME_ASSISTANT_TOKEN:-${HA_TOKEN}}
-      HA_TOKEN: ${HA_TOKEN:-${HOME_ASSISTANT_TOKEN}}
       HOME_ASSISTANT_TIMEOUT_MS: ${HOME_ASSISTANT_TIMEOUT_MS:-15000}
       LIGHTS_CONFIG_PATH: /app/config/lights.json
       ADMIN_WEB_PORT: 4000
@@ -25,6 +24,8 @@ services:
     build:
       context: .
       dockerfile: apps/log-platform/Dockerfile
+    environment:
+      VITE_ADMIN_API_BASE_URL: /api
     ports:
       - "5173:80"
     depends_on:

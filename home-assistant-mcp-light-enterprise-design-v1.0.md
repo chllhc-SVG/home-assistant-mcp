@@ -1,43 +1,39 @@
-# 企业级大模型通过 MCP 控制 Home Assistant 灯光的正式设计方案 v1.0
+# Home Assistant MCP 控制层设计文档 v1.1
 
 ## 1. 文档概述
 
 ### 1.1 文档目的
 
-本文档用于定义“**大模型通过 MCP 控制 Home Assistant 灯光**”的企业级实现方案，明确系统目标、架构边界、MCP 工具接口、数据结构、异常处理、日志审计、安全控制和后续扩展策略。
+本文档定义当前仓库的真实实现：**通过 MCP 控制层连接外部 Home Assistant，并由本地 Docker 启动前端系统页面与 API 服务**。本文档用于统一说明：
 
-本文档的定位是：
+- 当前系统目标
+- 实际部署形态
+- MCP 工具分类
+- Home Assistant 设备控制边界
+- Docker 一键启动方式
+- 日志与安全约束
+- 未来扩展方向
 
-- 作为产品、研发、测试、运维的统一设计依据
-- 作为 MCP Server 开发的正式接口约束
-- 作为 Home Assistant 对接实现的开发基线
-- 作为后续其他部门接手时的标准化交付文档
-- 作为 TypeScript 版 MCP Server 与前端日志平台的实现基线
+### 1.2 当前实现范围
 
-### 1.2 当前范围
+当前阶段实现的是“**外部 Home Assistant + 本地 MCP 控制层 + 本地系统页面**”，具体包括：
 
-当前阶段仅实现以下灯光控制能力：
-
-- 查询灯光列表
-- 解析灯光名称
-- 查询灯光状态
-- 打开灯光
-- 关闭灯光
-- 设置灯光亮度
-- 同时设置灯光开关与亮度
+- 查询可控设备列表
+- 解析设备名称与别名
+- 查询设备状态
+- 打开/关闭 `light.*` 与 `switch.*` 设备
+- 控制 `light.*` 设备亮度
+- 记录审计日志
+- 本地 Docker 一键启动
 
 ### 1.3 非目标范围
 
-本阶段明确不包含：
+当前阶段不包含：
 
-- 空调控制
-- 风扇控制
-- 插座控制
-- 门锁控制
-- 场景联动
-- 自动化规则
-- 多设备编排
-- 任意 Home Assistant 服务透传
+- 在本仓库中启动 Home Assistant 本体
+- 通用 Home Assistant 服务透传
+- 空调、风扇、门锁、场景联动等非当前白名单设备
+- 自动化规则编排
 
 ---
 
@@ -45,218 +41,173 @@
 
 ### 2.1 设计目标
 
-本方案的目标是建立一条标准化、低耦合、可审计、可扩展的控制链路，使用户可以通过自然语言指令控制 Home Assistant 中的灯光设备。
+1. **外部 Home Assistant 接入**  
+   通过 `.env` 指定外部 Home Assistant 的地址与 token。
 
-核心目标如下：
+2. **Docker 化部署**  
+   本地只需 `pnpm docker:dev` 即可启动后端与前端页面。
 
-1. **链路清晰**  
-   大模型只负责理解意图，MCP Server 负责能力控制，Home Assistant 负责设备执行。
+3. **能力收敛**  
+   仅开放白名单设备与明确工具，不开放任意 API 代理。
 
-2. **接口标准化**  
-   所有灯光能力通过固定 MCP 工具暴露，避免模型直接接触底层实体协议。
+4. **可维护与可交接**  
+   工具、配置、前端、Docker 启动脚本职责清晰。
 
-3. **企业可维护**  
-   设备目录、能力约束、权限策略、日志审计全部配置化和模块化。
-
-4. **后续易扩展**  
-   后续可平滑扩展到插座、空调、风扇、场景，不破坏当前接口设计。
-
-5. **安全可控**  
-   令牌不下发前端，动作受限于白名单和设备能力，所有操作可追踪。
+5. **可追踪**  
+   所有操作记录审计日志，支持回查。
 
 ### 2.2 设计原则
 
-#### 原则一：职责单一
-每一层只做自己的事情：
-
-- 大模型：理解意图
-- MCP Server：暴露能力、校验、编排、审计
-- Home Assistant：执行控制
-- 设备层：物理响应
-
-#### 原则二：能力收敛
-MCP 不做任意 API 代理，不开放不受控的通用调用入口。
-
-#### 原则三：模型不可越权
-模型只能调用公开工具，不能直接访问 token、配置、底层网络资源。
-
-#### 原则四：配置优先
-设备信息、别名、支持能力、风险等级全部走配置，不硬编码。
-
-#### 原则五：结果闭环
-每次控制建议进行状态回读，确保实际状态与预期一致。
+- 职责单一
+- 以配置驱动设备白名单
+- 模型只能调用公开工具
+- 控制后进行状态回读
+- 默认不触碰本地 Home Assistant 容器
 
 ---
 
-## 3. 业务边界与术语定义
-
-### 3.1 业务边界
-
-本系统只处理灯光相关能力，灯光是当前唯一设备域。
-
-系统控制对象统一映射到 Home Assistant 的 `light` 域实体。
-
-### 3.2 关键术语
-
-| 术语 | 定义 |
-|---|---|
-| 大模型 | 用于自然语言理解和工具调用决策的 LLM/Agent |
-| MCP Server | 通过 MCP 协议向大模型提供结构化工具能力的服务 |
-| Home Assistant | 智能家居中枢，负责设备接入和控制 |
-| 实体 `entity_id` | Home Assistant 中设备的唯一标识，如 `light.living_room_main` |
-| 设备目录 | 存储灯光设备别名、实体 ID、能力、房间等信息的配置或数据库 |
-| 亮度 | 灯光亮度值，统一采用 `0~255` 标准 |
-| 状态回读 | 控制执行后再次读取实体状态，验证实际结果 |
-
----
-
-## 4. 总体架构
-
-### 4.1 架构图
+## 3. 当前架构
 
 ```mermaid
 flowchart LR
-    U[用户自然语言] --> LLM[大模型 / Agent]
-    LLM --> MCP[MCP Server]
-    MCP --> REG[设备目录 / 别名映射]
-    MCP --> POL[策略与权限控制]
-    MCP --> HA[Home Assistant API 适配器]
-    HA --> HASS[Home Assistant]
-    HASS --> LIGHT[灯光设备]
-    MCP --> LOG[审计日志 / 追踪日志]
+    U[用户 / 前端系统页面] --> FE[前端系统页面]
+    FE --> API[MCP 控制层 API]
+    API --> REG[设备白名单 / 目录]
+    API --> POL[策略校验]
+    API --> HA[Home Assistant REST API]
+    HA --> EXT[外部 Home Assistant]
+    API --> LOG[审计日志]
 ```
 
-### 4.2 架构说明
+### 3.1 架构说明
 
-#### 用户层
-用户通过聊天窗口、语音助手、App 或网页输入自然语言，例如：
-
-- 打开客厅灯
-- 关闭卧室灯
-- 把餐厅灯调亮一点
-- 现在灯开着吗
-
-#### 大模型层
-大模型负责：
-
-- 识别用户意图
-- 识别灯光名称、别名、房间
-- 判断是否需要查询状态
-- 判断是否需要设置亮度
-- 调用对应 MCP 工具
-
-#### MCP Server 层
-MCP Server 负责：
-
-- 暴露标准灯光能力
-- 解析设备名称和别名
-- 校验参数和能力
-- 调用 Home Assistant API
-- 做状态回读
-- 统一错误码
-- 记录审计日志
-
-#### Home Assistant 层
-Home Assistant 负责：
-
-- 管理灯光实体
-- 提供状态查询
-- 执行开关和亮度控制
-- 维护状态一致性
+- **前端系统页面** 负责展示设备、日志和控制入口
+- **MCP 控制层 API** 负责设备解析、权限、控制与日志
+- **外部 Home Assistant** 负责真实设备执行
+- **本地 Docker** 只启动 MCP 层与系统页面，不启动 Home Assistant 本体
 
 ---
 
-## 5. 企业级设计要求
+## 4. MCP 工具分类
 
-### 5.1 可交接性
+当前工具按照职责分为三类：
 
-为保证后续其他团队可顺利接手，本方案必须满足：
+### 4.1 设备发现类
 
-1. 接口文档完整
-2. 数据结构明确
-3. 错误码统一
-4. 配置与代码分离
-5. 日志可追踪
-6. 目录结构标准化
-7. 扩展方式明确
-8. 默认行为一致
+- `list_lights`：列出可控设备
+- `resolve_light`：按别名或关键字解析设备
 
-### 5.2 可维护性
+### 4.2 设备状态类
 
-- 新增灯光不改核心逻辑，只改设备目录
-- 设备能力差异通过 capability 字段控制
-- 工具输入输出统一规范
-- 业务异常可读且可定位
-- 逻辑分层清晰，避免耦合
+- `get_light_state`：查询设备当前状态
 
-### 5.3 扩展性
+### 4.3 设备控制类
 
-当前为灯光域，但设计需支持未来扩展到：
+- `turn_on_light`：打开设备
+- `turn_off_light`：关闭设备
+- `set_light_brightness`：设置亮度
+- `set_light_state`：统一设置开关状态与亮度
 
-- `switch`
-- `climate`
-- `fan`
-- `scene`
+### 4.4 工具层实现位置
 
-扩展时应复用公共结构、错误码、日志、配置方式，不破坏当前接口风格。
+- 工具入口：`packages/mcp-server/src/tools/index.ts`
+- 灯光工具：`packages/mcp-server/src/tools/lights.ts`
+- 公共工具方法：`packages/mcp-server/src/tools/shared.ts`
 
 ---
 
-## 6. 灯光控制能力定义
+## 5. 设备抽象模型
 
-### 6.1 当前支持能力
-
-- `list_lights`
-- `resolve_light`
-- `get_light_state`
-- `turn_on_light`
-- `turn_off_light`
-- `set_light_brightness`
-- `set_light_state`
-
-### 6.2 能力说明
-
-#### 查询列表
-列出当前可控制的灯光设备，支持按房间、关键字、亮度能力过滤。
-
-#### 名称解析
-根据用户自然语言中的“客厅灯、主卧灯、沙发灯”等别名映射到具体实体。
-
-#### 状态查询
-返回灯光当前状态，包括 `on/off/unavailable/unknown`，并可返回亮度值。
-
-#### 开关控制
-通过 Home Assistant 标准 `light.turn_on` 和 `light.turn_off` 控制。
-
-#### 亮度控制
-统一采用 `0~255` 范围，若设备不支持亮度，必须明确拒绝。
-
-#### 统一状态设置
-允许一次性设置开关和亮度，适用于“打开并调到 80%”这类场景。
-
----
-
-## 7. 统一设备抽象模型
-
-### 7.1 设备对象定义
+当前设备白名单同时支持 `light` 与 `switch`：
 
 ```json
 {
-  "device_id": "light_living_room_main",
-  "display_name": "客厅灯",
-  "aliases": ["客厅主灯", "大灯", "沙发灯"],
-  "entity_id": "light.living_room_main",
-  "domain": "light",
-  "room": "living_room",
-  "type": "light",
-  "supports_brightness": true,
-  "capabilities": ["turn_on", "turn_off", "set_brightness", "get_state"],
+  "device_id": "switch_xiaomi_w2_8263_left_switch_service",
+  "display_name": "开关左键",
+  "aliases": ["左键", "开关左键"],
+  "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
+  "domain": "switch",
+  "room": "5f_lounge",
+  "type": "switch",
+  "supports_brightness": false,
+  "capabilities": ["turn_on", "turn_off", "get_state"],
   "risk_level": "low",
   "enabled": true
 }
 ```
 
-### 7.2 字段规范
+`light.*` 设备可以支持亮度；`switch.*` 设备仅支持开关与状态查询。
+
+---
+
+## 6. Docker 启动方式
+
+### 6.1 一键启动
+
+```bash
+pnpm docker:dev
+```
+
+该命令会：
+
+- 检查 `.env`
+- 启动 Docker Compose
+- 构建 MCP 后端与前端页面
+- 打印访问地址
+- 尝试自动打开浏览器
+
+### 6.2 访问地址
+
+- 系统页面：`http://127.0.0.1:5173`
+- MCP API：`http://127.0.0.1:4000/healthz`
+- 设备控制 API：`http://127.0.0.1:4000/api/control/lights`
+
+### 6.3 环境变量
+
+示例 `.env`：
+
+```env
+HOME_ASSISTANT_BASE_URL=http://192.168.150.11:8123
+HOME_ASSISTANT_TOKEN=your_home_assistant_long_lived_token
+HOME_ASSISTANT_TIMEOUT_MS=15000
+```
+
+---
+
+## 7. 目录结构
+
+- `apps/log-platform`：前端系统页面
+- `packages/mcp-server`：MCP 控制层后端
+- `config/lights.json`：设备白名单
+- `start.bat` / `start.ps1`：一键启动脚本
+- `docker-compose.yml`：Docker 编排文件
+
+---
+
+## 8. 安全与边界
+
+- 不在前端暴露 Home Assistant token
+- 不启动本地 Home Assistant 本体
+- 只允许设备白名单内的实体被控制
+- 所有控制动作写入审计日志
+- 亮度仅对支持亮度的 `light` 设备开放
+
+---
+
+## 9. 后续扩展方向
+
+未来可在当前模式基础上继续扩展：
+
+- `climate`
+- `fan`
+- `scene`
+- `cover`
+
+扩展方式建议保持：
+
+- 新增分类文件
+- 新增对应工具模块
+- 不破坏现有灯光与开关工具接口
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
