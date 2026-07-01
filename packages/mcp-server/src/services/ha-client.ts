@@ -1,3 +1,5 @@
+import { extractEntityCapabilitySnapshot } from './device-capabilities.js';
+
 export class HomeAssistantError extends Error {
   constructor(
     public readonly code: 'AUTH_FAILED' | 'TIMEOUT' | 'SERVICE_FAILED',
@@ -67,21 +69,32 @@ export class HaClient {
     return this.request<Array<Record<string, unknown>>>('/api/states', { method: 'GET' });
   }
 
-  async discoverEntities(domains = ['light', 'switch']) {
+  async discoverEntities(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
     const states = await this.listStates();
     return states
       .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
       .map((item) => {
-        const attributes = typeof item.attributes === 'object' && item.attributes !== null ? (item.attributes as Record<string, unknown>) : {};
-        const entityId = item.entity_id as string;
-        return {
-          entity_id: entityId,
-          domain: entityId.split('.')[0],
-          state: typeof item.state === 'string' ? item.state : 'unknown',
-          friendly_name: typeof attributes.friendly_name === 'string' ? attributes.friendly_name : entityId,
-          supports_brightness: Object.prototype.hasOwnProperty.call(attributes, 'brightness'),
-          raw: item,
-        };
+        const snapshot = extractEntityCapabilitySnapshot(item);
+        if (!snapshot) {
+          return {
+            entity_id: item.entity_id as string,
+            domain: (item.entity_id as string).split('.')[0],
+            state: 'unknown',
+            friendly_name: item.entity_id as string,
+            supports_brightness: false,
+            supports_value: false,
+            supports_temperature: false,
+            supports_hvac_mode: false,
+            supports_fan_mode: false,
+            supports_swing_mode: false,
+            supported_color_modes: [],
+            hvac_modes: [],
+            fan_modes: [],
+            swing_modes: [],
+            raw: item,
+          };
+        }
+        return snapshot;
       });
   }
 
@@ -116,6 +129,48 @@ export class HaClient {
     return this.request('/api/services/light/turn_off', {
       method: 'POST',
       body: JSON.stringify({ entity_id: entityId }),
+    });
+  }
+
+  pressButton(entityId: string) {
+    return this.request('/api/services/button/press', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId }),
+    });
+  }
+
+  setNumberValue(entityId: string, value: number) {
+    return this.request('/api/services/number/set_value', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, value }),
+    });
+  }
+
+  setClimateTemperature(entityId: string, temperature: number) {
+    return this.request('/api/services/climate/set_temperature', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, temperature }),
+    });
+  }
+
+  setClimateHvacMode(entityId: string, hvacMode: string) {
+    return this.request('/api/services/climate/set_hvac_mode', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, hvac_mode: hvacMode }),
+    });
+  }
+
+  setClimateFanMode(entityId: string, fanMode: string) {
+    return this.request('/api/services/climate/set_fan_mode', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, fan_mode: fanMode }),
+    });
+  }
+
+  setClimateSwingMode(entityId: string, swingMode: string) {
+    return this.request('/api/services/climate/set_swing_mode', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, swing_mode: swingMode }),
     });
   }
 }

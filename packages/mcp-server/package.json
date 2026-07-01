@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "dev:api": "tsx watch src/main.ts",
-    "build": "tsup src/main.ts --format esm,cjs --dts",
+    "build": "tsup src/main.ts --format esm --dts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

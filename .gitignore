@@ -3,6 +3,7 @@ node_modules
 .idea/
 node_modules/
 dist/
+*.tsbuildinfo
 config/home-assistant_v2.db-wal
 *.db-wal
 
