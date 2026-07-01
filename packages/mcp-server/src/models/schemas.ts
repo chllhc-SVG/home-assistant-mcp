@@ -22,15 +22,17 @@ export const turnOffLightInputSchema = z.object({
   entity_id: z.string().min(1),
 });
 
+const brightnessSchema = z.coerce.number().finite().transform((value) => Math.round(value)).pipe(z.number().int().min(0).max(255));
+
 export const setLightBrightnessInputSchema = z.object({
   entity_id: z.string().min(1),
-  brightness: z.number().int().min(0).max(255),
+  brightness: brightnessSchema,
 });
 
 export const setLightStateInputSchema = z.object({
   entity_id: z.string().min(1),
   state: z.enum(['on', 'off']),
-  brightness: z.number().int().min(0).max(255).optional(),
+  brightness: brightnessSchema.optional(),
 });
 
 export const pressButtonInputSchema = z.object({

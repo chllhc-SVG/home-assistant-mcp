@@ -4,7 +4,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, writeAudit } from './shared.js';
+import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateSwitchToolsDeps {
   registry: LightRegistry;
@@ -20,12 +20,16 @@ export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: C
     const policyCheck = policy.canControlSwitch(device);
     if (!policyCheck.allowed || !device) return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '开关不可用或不允许操作', { entity_id: entityId });
 
+    const beforeState = await haClient.getState(entityId);
+    const beforeSummary = buildStateSummary(beforeState);
     const response = toolName === 'turn_on_switch' ? await haClient.turnOn(entityId) : await haClient.turnOff(entityId);
-    const state = await haClient.getState(entityId);
-    const summary = buildStateSummary(state);
-    const requestId = makeRequestId();
+    const callState = await haClient.getState(entityId);
+    const callSummary = buildStateSummary(callState);
     const expectedState = toolName === 'turn_on_switch' ? 'on' : 'off';
-    const success = hasExpectedPowerState(summary, expectedState);
+    const confirmedState = await waitForExpectedPowerState(() => haClient.getState(entityId), expectedState, 10, 300);
+    const summary = confirmedState.summary;
+    const confirmed = confirmedState.confirmed;
+    const requestId = makeRequestId();
 
     await writeAudit(auditLogger, {
       id: requestId,
@@ -33,24 +37,24 @@ export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: C
       timestamp: now(),
       source: 'mcp',
       tool_name: toolName,
-      tool_args: { entity_id: entityId },
+      tool_args: { entity_id: entityId, before_state: beforeSummary.state_after, call_state: callSummary.state_after },
       resolved_device: { display_name: device.display_name, entity_id: device.entity_id },
-      result: { success, ...(success ? {} : { error_code: 'STATE_NOT_CHANGED' }), ...summary },
+      result: { success: true, ...summary, state_confirmed: confirmed },
       device_id: device.device_id,
       entity_id: entityId,
-      result_status: success ? 'success' : 'failure',
-      ...(success ? {} : { error_code: 'STATE_NOT_CHANGED' }),
+      result_status: 'success',
     });
 
-    if (!success) {
-      return fail('STATE_NOT_CHANGED', 'Home Assistant 已接收开关请求，但状态回读未变为预期值', {
-        entity_id: entityId,
-        expected_state: expectedState,
-        state_after: summary.state_after,
-      });
-    }
-
-    return ok({ entity_id: entityId, action: toolName === 'turn_on_switch' ? 'turn_on' : 'turn_off', ...summary, raw: response });
+    return ok({
+      entity_id: entityId,
+      action: toolName === 'turn_on_switch' ? 'turn_on' : 'turn_off',
+      before_state: beforeSummary.state_after,
+      call_state: callSummary.state_after,
+      ...summary,
+      state_confirmed: confirmed,
+      state_warning: confirmed ? undefined : `实际状态仍为 ${summary.state_after}，但控制请求已发送`,
+      raw: response,
+    });
   };
 
   return {

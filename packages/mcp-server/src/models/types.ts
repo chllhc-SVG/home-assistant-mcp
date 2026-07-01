@@ -56,6 +56,7 @@ export interface ControllableDevice {
   capabilities: DeviceCapability[];
   risk_level: DeviceRiskLevel;
   enabled: boolean;
+  stateless?: boolean;
 }
 
 export type LightDevice = ControllableDevice;
@@ -153,6 +154,7 @@ export interface AuditEvent {
     hvac_mode_after?: string;
     fan_mode_after?: string;
     swing_mode_after?: string;
+    state_confirmed?: boolean;
   };
   duration_ms?: number;
   device_id?: string;
