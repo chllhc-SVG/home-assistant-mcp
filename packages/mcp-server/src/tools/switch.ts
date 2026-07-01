@@ -1,0 +1,77 @@
+import { getDeviceStateInputSchema, turnOffSwitchInputSchema, turnOnSwitchInputSchema } from '../models/schemas.js';
+import { fail, ok } from '../utils/result.js';
+import type { AuditLogger } from '../services/audit-logger.js';
+import type { HaClient } from '../services/ha-client.js';
+import type { LightRegistry } from '../services/light-registry.js';
+import type { PolicyEngine } from '../services/policy-engine.js';
+import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, writeAudit } from './shared.js';
+
+interface CreateSwitchToolsDeps {
+  registry: LightRegistry;
+  policy: PolicyEngine;
+  haClient: HaClient;
+  auditLogger: AuditLogger;
+}
+
+export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: CreateSwitchToolsDeps) => {
+  const control = async (toolName: 'turn_on_switch' | 'turn_off_switch', entityId: string) => {
+    await registry.tryRefreshFromHomeAssistant(haClient);
+    const device = registry.getByEntityId(entityId);
+    const policyCheck = policy.canControlSwitch(device);
+    if (!policyCheck.allowed || !device) return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '开关不可用或不允许操作', { entity_id: entityId });
+
+    const response = toolName === 'turn_on_switch' ? await haClient.turnOn(entityId) : await haClient.turnOff(entityId);
+    const state = await haClient.getState(entityId);
+    const summary = buildStateSummary(state);
+    const requestId = makeRequestId();
+    const expectedState = toolName === 'turn_on_switch' ? 'on' : 'off';
+    const success = hasExpectedPowerState(summary, expectedState);
+
+    await writeAudit(auditLogger, {
+      id: requestId,
+      request_id: requestId,
+      timestamp: now(),
+      source: 'mcp',
+      tool_name: toolName,
+      tool_args: { entity_id: entityId },
+      resolved_device: { display_name: device.display_name, entity_id: device.entity_id },
+      result: { success, ...(success ? {} : { error_code: 'STATE_NOT_CHANGED' }), ...summary },
+      device_id: device.device_id,
+      entity_id: entityId,
+      result_status: success ? 'success' : 'failure',
+      ...(success ? {} : { error_code: 'STATE_NOT_CHANGED' }),
+    });
+
+    if (!success) {
+      return fail('STATE_NOT_CHANGED', 'Home Assistant 已接收开关请求，但状态回读未变为预期值', {
+        entity_id: entityId,
+        expected_state: expectedState,
+        state_after: summary.state_after,
+      });
+    }
+
+    return ok({ entity_id: entityId, action: toolName === 'turn_on_switch' ? 'turn_on' : 'turn_off', ...summary, raw: response });
+  };
+
+  return {
+    async turn_on_switch(input: unknown) {
+      const parsed = turnOnSwitchInputSchema.parse(input);
+      return control('turn_on_switch', parsed.entity_id);
+    },
+
+    async turn_off_switch(input: unknown) {
+      const parsed = turnOffSwitchInputSchema.parse(input);
+      return control('turn_off_switch', parsed.entity_id);
+    },
+
+    async get_switch_state(input: unknown) {
+      const parsed = getDeviceStateInputSchema.parse(input);
+      await registry.tryRefreshFromHomeAssistant(haClient);
+      const device = registry.getByEntityId(parsed.entity_id);
+      const policyCheck = policy.canControlSwitch(device);
+      if (!policyCheck.allowed) return fail(policyCheck.reason, '开关不可用或不允许查询', { entity_id: parsed.entity_id });
+
+      return ok(await haClient.getState(parsed.entity_id));
+    },
+  };
+};

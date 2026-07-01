@@ -106,7 +106,7 @@ config/lights.json
 | `display_name` | 页面上显示的名字 |
 | `aliases` | 别名，方便大模型或用户识别 |
 | `entity_id` | Home Assistant 实体 ID |
-| `domain` | 设备域，例如 `light`、`switch` |
+| `domain` | 设备域，例如 `light`、`switch`、`button`、`number`、`climate`、`sensor` |
 | `room` | 所在房间 |
 | `type` | 设备类型 |
 | `supports_brightness` | 是否支持亮度 |
@@ -118,8 +118,12 @@ config/lights.json
 
 - `light`：灯光
 - `switch`：开关
+- `button`：按钮
+- `number`：数值实体
+- `climate`：空调/温控设备
+- `sensor`：传感器
 
-`light` 一般支持亮度，`switch` 只支持开关和状态查询。
+系统会从 Home Assistant 状态快照里补全亮度、数值范围、温度范围、HVAC 模式、风扇模式、摆风模式和传感器单位等能力。
 
 ---
 
@@ -129,23 +133,40 @@ config/lights.json
 
 - `packages/mcp-server/src/tools/index.ts`
 - `packages/mcp-server/src/tools/lights.ts`
+- `packages/mcp-server/src/tools/switch.ts`
+- `packages/mcp-server/src/tools/button.ts`
+- `packages/mcp-server/src/tools/number.ts`
+- `packages/mcp-server/src/tools/climate.ts`
+- `packages/mcp-server/src/tools/sensor.ts`
 - `packages/mcp-server/src/tools/shared.ts`
 
 ### 6.1 设备发现类
 
 - `list_lights`：列出可用设备
 - `resolve_light`：按别名或关键字匹配设备
+- `list_climate_devices`：列出空调/温控设备
 
 ### 6.2 状态查询类
 
-- `get_light_state`：查询某个设备当前状态
+- `get_light_state`：查询灯光状态
+- `get_switch_state`：查询开关状态
+- `get_button_state`：查询按钮状态
+- `get_number_state`：查询数值实体状态
+- `get_climate_state`：查询空调状态
+- `get_sensor_state`：查询传感器状态
 
 ### 6.3 控制类
 
-- `turn_on_light`：打开设备
-- `turn_off_light`：关闭设备
+- `turn_on_light` / `turn_off_light`：控制灯光开关
 - `set_light_brightness`：设置亮度
 - `set_light_state`：统一设置开/关和亮度
+- `turn_on_switch` / `turn_off_switch`：控制开关
+- `press_button`：按下按钮
+- `set_number_value`：设置数值实体
+- `set_climate_temperature`：设置空调目标温度
+- `set_climate_hvac_mode`：设置空调 HVAC 模式
+- `set_climate_fan_mode`：设置空调风扇模式
+- `set_climate_swing_mode`：设置空调摆风模式
 
 ### 6.4 公共方法
 
@@ -192,7 +213,13 @@ GET /healthz
 GET /api/admin/devices
 ```
 
-#### 发现 Home Assistant 灯光实体
+#### 发现 Home Assistant 设备实体
+
+```http
+GET /api/admin/ha/entities/discover
+```
+
+#### 兼容旧灯光发现接口
 
 ```http
 GET /api/admin/ha/lights/discover
@@ -216,18 +243,32 @@ body：
 
 ```http
 GET /api/control/lights/{entityId}/state
+GET /api/control/switches/{entityId}/state
+GET /api/control/buttons/{entityId}/state
+GET /api/control/numbers/{entityId}/state
+GET /api/control/climates/{entityId}/state
+GET /api/control/sensors/{entityId}/state
 ```
 
-#### 打开设备
+#### 控制灯光和开关
 
 ```http
 POST /api/control/lights/{entityId}/turn-on
+POST /api/control/lights/{entityId}/turn-off
+POST /api/control/switches/{entityId}/turn-on
+POST /api/control/switches/{entityId}/turn-off
 ```
 
-#### 关闭设备
+#### 按钮
 
 ```http
-POST /api/control/lights/{entityId}/turn-off
+POST /api/control/buttons/{entityId}/press
+```
+
+#### 数值实体
+
+```http
+POST /api/control/numbers/{entityId}/value
 ```
 
 #### 设置亮度
@@ -244,19 +285,13 @@ body：
 }
 ```
 
-#### 统一设置状态
+#### 空调/温控
 
 ```http
-POST /api/control/lights/{entityId}/state
-```
-
-body：
-
-```json
-{
-  "state": "on",
-  "brightness": 180
-}
+POST /api/control/climates/{entityId}/temperature
+POST /api/control/climates/{entityId}/hvac-mode
+POST /api/control/climates/{entityId}/fan-mode
+POST /api/control/climates/{entityId}/swing-mode
 ```
 
 ---
@@ -273,6 +308,14 @@ body：
 - `turn_off_light(entity_id)`
 - `set_light_brightness(entity_id, brightness)`
 - `set_light_state(entity_id, state, brightness)`
+- `turn_on_switch(entity_id)`
+- `turn_off_switch(entity_id)`
+- `press_button(entity_id)`
+- `set_number_value(entity_id, value)`
+- `get_sensor_state(entity_id)`
+- `set_climate_temperature(entity_id, temperature)`
+- `set_climate_hvac_mode(entity_id, hvac_mode)`
+- `set_climate_fan_mode(entity_id, fan_mode)`
 
 模型先解析意图，再调用这些工具，最后由后端去访问 Home Assistant。
 
@@ -298,7 +341,8 @@ pnpm docker:dev
 
 - 系统页面：`http://127.0.0.1:5173`
 - 后端健康检查：`http://127.0.0.1:4000/healthz`
-- 设备控制 API：`http://127.0.0.1:4000/api/control/lights`
+- 设备列表 API：`http://127.0.0.1:4000/api/admin/devices`
+- 设备发现 API：`http://127.0.0.1:4000/api/admin/ha/entities/discover`
 
 ### `.env` 示例
 
@@ -325,7 +369,7 @@ HOME_ASSISTANT_TIMEOUT_MS=15000
 
 ## 12. 后续怎么加新设备
 
-### 如果还是 `light` 或 `switch`
+### 如果是已支持设备域
 
 通常只要：
 
@@ -333,12 +377,13 @@ HOME_ASSISTANT_TIMEOUT_MS=15000
 2. 确认 Home Assistant 里实体存在
 3. 重新启动 `pnpm docker:dev`
 
-### 如果是新设备域
+已支持设备域包括 `light`、`switch`、`button`、`number`、`climate`、`sensor`。
+
+### 如果是新的设备域
 
 比如以后要加：
 
 - `fan`
-- `climate`
 - `scene`
 - `cover`
 

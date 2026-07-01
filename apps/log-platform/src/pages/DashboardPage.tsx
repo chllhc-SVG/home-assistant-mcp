@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, Button, Card, Col, Descriptions, Drawer, Form, Input, Layout, Row, Select, Slider, Space, Statistic, Table, Tag, Typography, message } from 'antd';
 import { ApiOutlined, BulbOutlined, CompassOutlined, FilterOutlined, PoweroffOutlined, ReloadOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { api, type DeviceRecord, type DiscoveredLight, type LogRecord } from '../api/client';
+import { api, type DeviceRecord, type DiscoveredEntity, type LogRecord } from '../api/client';
 
 const logColumns = [
   { title: '时间', dataIndex: 'timestamp', width: 220 },
@@ -38,10 +38,15 @@ export const DashboardPage = () => {
   const [form] = Form.useForm();
   const [logs, setLogs] = React.useState<LogRecord[]>(fallbackLogs);
   const [devices, setDevices] = React.useState<DeviceRecord[]>(fallbackDevices);
-  const [discoveredLights, setDiscoveredLights] = React.useState<DiscoveredLight[]>([]);
+  const [discoveredEntities, setDiscoveredEntities] = React.useState<DiscoveredEntity[]>([]);
   const [selectedDevice, setSelectedDevice] = React.useState<DeviceRecord | null>(null);
   const [selectedLog, setSelectedLog] = React.useState<LogRecord | null>(null);
   const [brightness, setBrightness] = React.useState(180);
+  const [targetTemperature, setTargetTemperature] = React.useState(23);
+  const [numberValue, setNumberValue] = React.useState(0);
+  const [hvacMode, setHvacMode] = React.useState<string>('auto');
+  const [fanMode, setFanMode] = React.useState<string>();
+  const [swingMode, setSwingMode] = React.useState<string>();
   const [overview, setOverview] = React.useState({ total: 0, success: 0, failure: 0, successRate: 0 });
   const [failureStats, setFailureStats] = React.useState<{ total: number; byErrorCode: Record<string, number>; byTool: Record<string, number> }>({ total: 0, byErrorCode: {}, byTool: {} });
   const [drawerOpen, setDrawerOpen] = React.useState(false);
@@ -78,31 +83,67 @@ export const DashboardPage = () => {
     void loadData();
   }, [loadData]);
 
+  React.useEffect(() => {
+    if (typeof selectedDevice?.brightness === 'number') {
+      setBrightness(selectedDevice.brightness);
+    }
+    if (typeof selectedDevice?.target_temperature === 'number') {
+      setTargetTemperature(selectedDevice.target_temperature);
+    }
+    if (selectedDevice?.hvac_mode) {
+      setHvacMode(selectedDevice.hvac_mode);
+    }
+    if (selectedDevice?.fan_mode) {
+      setFanMode(selectedDevice.fan_mode);
+    }
+    if (selectedDevice?.swing_mode) {
+      setSwingMode(selectedDevice.swing_mode);
+    }
+    if (typeof selectedDevice?.sensor_value === 'number') {
+      setNumberValue(selectedDevice.sensor_value);
+    }
+  }, [
+    selectedDevice?.entity_id,
+    selectedDevice?.brightness,
+    selectedDevice?.target_temperature,
+    selectedDevice?.hvac_mode,
+    selectedDevice?.fan_mode,
+    selectedDevice?.swing_mode,
+    selectedDevice?.sensor_value,
+  ]);
+
   const refreshLogs = async () => {
     await loadData();
   };
 
-  const discoverLights = async () => {
+  const discoverEntities = async () => {
     setDiscoverLoading(true);
     try {
-      const result = await api.discoverLights();
-      setDiscoveredLights(result.lights);
-      messageApi.success(`已发现 ${result.lights.length} 个 Home Assistant 灯光实体`);
+      const result = await api.discoverEntities();
+      setDiscoveredEntities(result.entities);
+      messageApi.success(`已发现 ${result.entities.length} 个 Home Assistant 设备实体`);
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : '发现灯光实体失败');
+      messageApi.error(error instanceof Error ? error.message : '发现设备实体失败');
     } finally {
       setDiscoverLoading(false);
     }
   };
 
-  const control = async (action: 'on' | 'off' | 'brightness' | 'state') => {
+  const control = async (action: 'on' | 'off' | 'brightness' | 'press' | 'value' | 'temperature' | 'hvac_mode' | 'fan_mode' | 'swing_mode') => {
     if (!selectedDevice) return;
     setControlLoading(true);
     try {
-      if (action === 'on') await api.turnOnLight(selectedDevice.entity_id);
-      if (action === 'off') await api.turnOffLight(selectedDevice.entity_id);
+      if (action === 'on' && selectedDevice.domain === 'light') await api.turnOnLight(selectedDevice.entity_id);
+      if (action === 'off' && selectedDevice.domain === 'light') await api.turnOffLight(selectedDevice.entity_id);
+      if (action === 'on' && selectedDevice.domain === 'switch') await api.turnOnSwitch(selectedDevice.entity_id);
+      if (action === 'off' && selectedDevice.domain === 'switch') await api.turnOffSwitch(selectedDevice.entity_id);
       if (action === 'brightness') await api.setLightBrightness(selectedDevice.entity_id, brightness);
-      if (action === 'state') await api.setLightState(selectedDevice.entity_id, 'on', brightness);
+      if (action === 'press') await api.pressButton(selectedDevice.entity_id);
+      if (action === 'value') await api.setNumberValue(selectedDevice.entity_id, numberValue);
+      if (action === 'temperature') await api.setClimateTemperature(selectedDevice.entity_id, targetTemperature);
+      if (action === 'hvac_mode') await api.setClimateHvacMode(selectedDevice.entity_id, hvacMode);
+      if (action === 'fan_mode' && fanMode) await api.setClimateFanMode(selectedDevice.entity_id, fanMode);
+      if (action === 'swing_mode' && swingMode) await api.setClimateSwingMode(selectedDevice.entity_id, swingMode);
       messageApi.success('控制指令已执行，日志已刷新');
       await refreshLogs();
     } catch (error) {
@@ -116,7 +157,18 @@ export const DashboardPage = () => {
     if (!selectedDevice) return;
     setControlLoading(true);
     try {
-      const state = await api.getLightState(selectedDevice.entity_id);
+      const state =
+        selectedDevice.domain === 'sensor'
+          ? await api.getSensorState(selectedDevice.entity_id)
+          : selectedDevice.domain === 'climate'
+            ? await api.getClimateState(selectedDevice.entity_id)
+            : selectedDevice.domain === 'switch'
+              ? await api.getSwitchState(selectedDevice.entity_id)
+              : selectedDevice.domain === 'button'
+                ? await api.getButtonState(selectedDevice.entity_id)
+                : selectedDevice.domain === 'number'
+                  ? await api.getNumberState(selectedDevice.entity_id)
+                  : await api.getLightState(selectedDevice.entity_id);
       messageApi.info(`当前状态：${String(state.state ?? 'unknown')}`);
       await refreshLogs();
     } catch (error) {
@@ -136,6 +188,113 @@ export const DashboardPage = () => {
     await loadData(params);
   };
 
+  const renderControlPanel = () => {
+    if (!selectedDevice) return null;
+
+    const domain = selectedDevice.domain;
+    const supportsLightBrightness = domain === 'light' && selectedDevice.supports_brightness;
+    const supportsTemperature = domain === 'climate' && selectedDevice.supports_temperature;
+    const supportsHvacMode = domain === 'climate' && selectedDevice.supports_hvac_mode && (selectedDevice.hvac_modes?.length ?? 0) > 0;
+    const supportsFanMode = domain === 'climate' && selectedDevice.supports_fan_mode && (selectedDevice.fan_modes?.length ?? 0) > 0;
+    const supportsSwingMode = domain === 'climate' && selectedDevice.supports_swing_mode && (selectedDevice.swing_modes?.length ?? 0) > 0;
+
+    return (
+      <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        {(domain === 'light' || domain === 'switch') ? (
+          <Space wrap>
+            <Button type="primary" icon={<BulbOutlined />} loading={controlLoading} onClick={() => void control('on')}>打开</Button>
+            <Button danger icon={<PoweroffOutlined />} loading={controlLoading} onClick={() => void control('off')}>关闭</Button>
+          </Space>
+        ) : null}
+
+        {supportsLightBrightness ? (
+          <div>
+            <Typography.Text strong>亮度：{brightness}</Typography.Text>
+            <Slider min={0} max={255} value={brightness} onChange={setBrightness} />
+            <Button loading={controlLoading} onClick={() => void control('brightness')}>设置亮度</Button>
+          </div>
+        ) : null}
+
+        {domain === 'button' ? (
+          <Button type="primary" loading={controlLoading} onClick={() => void control('press')}>按下</Button>
+        ) : null}
+
+        {domain === 'number' && selectedDevice.supports_value ? (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Typography.Text strong>数值：{numberValue}</Typography.Text>
+            <Slider
+              min={selectedDevice.value_min ?? 0}
+              max={selectedDevice.value_max ?? 100}
+              step={selectedDevice.value_step ?? 1}
+              value={numberValue}
+              onChange={setNumberValue}
+            />
+            <Button loading={controlLoading} onClick={() => void control('value')}>设置数值</Button>
+          </Space>
+        ) : null}
+
+        {domain === 'climate' ? (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {supportsTemperature ? (
+              <div>
+                <Typography.Text strong>目标温度：{targetTemperature}{selectedDevice.temperature_unit ?? '°C'}</Typography.Text>
+                <Slider
+                  min={selectedDevice.temperature_min ?? 16}
+                  max={selectedDevice.temperature_max ?? 30}
+                  step={selectedDevice.temperature_step ?? 1}
+                  value={targetTemperature}
+                  onChange={setTargetTemperature}
+                />
+                <Button loading={controlLoading} onClick={() => void control('temperature')}>设置温度</Button>
+              </div>
+            ) : null}
+            {supportsHvacMode ? (
+              <Space>
+                <Select
+                  style={{ width: 160 }}
+                  value={hvacMode}
+                  options={(selectedDevice.hvac_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
+                  onChange={setHvacMode}
+                />
+                <Button loading={controlLoading} onClick={() => void control('hvac_mode')}>设置模式</Button>
+              </Space>
+            ) : null}
+            {supportsFanMode ? (
+              <Space>
+                <Select
+                  style={{ width: 160 }}
+                  value={fanMode}
+                  options={(selectedDevice.fan_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
+                  onChange={setFanMode}
+                />
+                <Button loading={controlLoading} onClick={() => void control('fan_mode')}>设置风扇</Button>
+              </Space>
+            ) : null}
+            {supportsSwingMode ? (
+              <Space>
+                <Select
+                  style={{ width: 160 }}
+                  value={swingMode}
+                  options={(selectedDevice.swing_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
+                  onChange={setSwingMode}
+                />
+                <Button loading={controlLoading} onClick={() => void control('swing_mode')}>设置摆风</Button>
+              </Space>
+            ) : null}
+          </Space>
+        ) : null}
+
+        {domain === 'sensor' ? (
+          <Typography.Text>
+            当前值：{selectedDevice.sensor_value ?? selectedDevice.state ?? '-'}{selectedDevice.sensor_unit ?? ''}
+          </Typography.Text>
+        ) : null}
+
+        <Button loading={controlLoading} onClick={() => void queryState()}>查询状态</Button>
+      </Space>
+    );
+  };
+
   return (
     <Layout.Content style={{ minHeight: '100vh', padding: 24, background: 'linear-gradient(135deg, #eef4ff 0%, #f8fbff 45%, #fff7ed 100%)' }}>
       {contextHolder}
@@ -143,7 +302,7 @@ export const DashboardPage = () => {
         <Card bordered={false} style={{ borderRadius: 24, background: 'linear-gradient(120deg, #0f172a, #1d4ed8)', color: '#fff', boxShadow: '0 20px 50px rgba(15,23,42,.18)' }}>
           <Row align="middle" gutter={16}>
             <Col flex="auto">
-              <Typography.Title level={2} style={{ color: '#fff', marginBottom: 4 }}>Home Assistant 灯光控制中心</Typography.Title>
+              <Typography.Title level={2} style={{ color: '#fff', marginBottom: 4 }}>Home Assistant 设备控制中心</Typography.Title>
               <Typography.Text style={{ color: 'rgba(255,255,255,.76)' }}>集成 MCP 工具调用、设备控制、审计日志、状态追踪和 Home Assistant 映射。</Typography.Text>
             </Col>
             <Col><Tag color="processing" style={{ padding: '6px 12px', borderRadius: 999 }}>TS MCP Runtime</Tag></Col>
@@ -164,28 +323,30 @@ export const DashboardPage = () => {
                 <Select
                   style={{ width: '100%' }}
                   value={selectedDevice?.entity_id}
-                  placeholder="选择灯光设备"
+                  placeholder="选择设备"
                   options={devices.map((device) => ({ label: `${device.display_name} · ${device.entity_id}`, value: device.entity_id }))}
-                  onChange={(entityId) => setSelectedDevice(devices.find((device) => device.entity_id === entityId) ?? null)}
+                  onChange={(entityId) => {
+                    const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null;
+                    setSelectedDevice(nextDevice);
+                    if (typeof nextDevice?.brightness === 'number') setBrightness(nextDevice.brightness);
+                  }}
                 />
                 {selectedDevice ? (
                   <Descriptions bordered size="small" column={1}>
                     <Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item>
                     <Descriptions.Item label="实体 ID">{selectedDevice.entity_id}</Descriptions.Item>
+                    <Descriptions.Item label="类型">{selectedDevice.domain ?? '-'}</Descriptions.Item>
+                    <Descriptions.Item label="当前状态">{selectedDevice.state ?? '-'}</Descriptions.Item>
                     <Descriptions.Item label="房间">{selectedDevice.room ?? '-'}</Descriptions.Item>
                     <Descriptions.Item label="亮度能力">{selectedDevice.supports_brightness ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item>
+                    <Descriptions.Item label="数值能力">{selectedDevice.supports_value ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item>
+                    <Descriptions.Item label="温度能力">{selectedDevice.supports_temperature ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item>
+                    <Descriptions.Item label="HVAC 模式">{selectedDevice.hvac_modes?.length ? selectedDevice.hvac_modes.join(', ') : '-'}</Descriptions.Item>
+                    <Descriptions.Item label="传感器值">{selectedDevice.sensor_value === undefined ? '-' : `${selectedDevice.sensor_value}${selectedDevice.sensor_unit ?? ''}`}</Descriptions.Item>
+                    <Descriptions.Item label="能力来源">{selectedDevice.capability_source === 'home_assistant' ? <Tag color="blue">Home Assistant</Tag> : <Tag>配置</Tag>}</Descriptions.Item>
                   </Descriptions>
                 ) : null}
-                <div>
-                  <Typography.Text strong>亮度：{brightness}</Typography.Text>
-                  <Slider min={0} max={255} value={brightness} onChange={setBrightness} disabled={!selectedDevice?.supports_brightness} />
-                </div>
-                <Space wrap>
-                  <Button type="primary" icon={<BulbOutlined />} loading={controlLoading} onClick={() => void control('on')}>开灯</Button>
-                  <Button danger icon={<PoweroffOutlined />} loading={controlLoading} onClick={() => void control('off')}>关灯</Button>
-                  <Button loading={controlLoading} disabled={!selectedDevice?.supports_brightness} onClick={() => void control('brightness')}>设置亮度</Button>
-                  <Button loading={controlLoading} onClick={() => void queryState()}>查询状态</Button>
-                </Space>
+                {renderControlPanel()}
               </Space>
             </Card>
           </Col>
@@ -231,17 +392,19 @@ export const DashboardPage = () => {
           </Col>
         </Row>
 
-        <Card title={<Space><CompassOutlined />Home Assistant 灯光自动发现</Space>} bordered={false} style={{ borderRadius: 20 }} extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverLights()}>发现灯光</Button>}>
-          <Alert type="info" showIcon style={{ marginBottom: 16 }} message="这里展示 Home Assistant 中实际存在的 light.* 实体。若要出现在控制下拉框，需要把对应 entity_id 写入 config/lights.json 白名单。" />
+        <Card title={<Space><CompassOutlined />Home Assistant 设备自动发现</Space>} bordered={false} style={{ borderRadius: 20 }} extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverEntities()}>发现设备</Button>}>
+          <Alert type="info" showIcon style={{ marginBottom: 16 }} message="这里展示 Home Assistant 中实际存在的 light、switch、button、number、climate、sensor 实体。若要出现在控制下拉框，需要把对应 entity_id 写入 config/lights.json 白名单。" />
           <Table
             rowKey="entity_id"
-            dataSource={discoveredLights}
+            dataSource={discoveredEntities}
             pagination={{ pageSize: 6 }}
             columns={[
               { title: '实体 ID', dataIndex: 'entity_id' },
               { title: '名称', dataIndex: 'friendly_name' },
+              { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> },
               { title: '状态', dataIndex: 'state', render: (value: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value}</Tag> },
               { title: '亮度能力', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '未知/不支持'}</Tag> },
+              { title: '温度能力', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
             ]}
           />
         </Card>
@@ -254,8 +417,10 @@ export const DashboardPage = () => {
             columns={[
               { title: '设备名', dataIndex: 'display_name' },
               { title: 'entity_id', dataIndex: 'entity_id' },
+              { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> },
               { title: '房间', dataIndex: 'room' },
               { title: '亮度', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
+              { title: '温度', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
               { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> },
             ]}
           />

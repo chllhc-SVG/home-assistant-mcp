@@ -44,7 +44,17 @@ docker compose up -d
 
 - 系统页面: http://127.0.0.1:5173
 - MCP API: http://127.0.0.1:4000/healthz
-- 设备控制 API: http://127.0.0.1:4000/api/control/lights
+- 设备列表 API: http://127.0.0.1:4000/api/admin/devices
+- 设备发现 API: http://127.0.0.1:4000/api/admin/ha/entities/discover
+
+## 当前支持的设备域
+
+- `light`：开关、亮度、状态查询
+- `switch`：开关、状态查询
+- `button`：按下、状态查询
+- `number`：数值设置、状态查询
+- `climate`：温度、HVAC 模式、风扇模式、摆风模式、状态查询
+- `sensor`：状态查询
 
 ## 常用命令
 
@@ -62,5 +72,5 @@ docker compose down
 
 - `packages/mcp-server`：MCP 控制层后端
 - `apps/log-platform`：前端系统页面
-- `config/lights.json`：可控制设备白名单
+- `config/lights.json`：可控制设备白名单，历史命名保留，内容已支持多设备域
 - `start.bat` / `start.ps1`：Windows 一键启动脚本
