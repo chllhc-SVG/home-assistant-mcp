@@ -132,6 +132,13 @@ export class HaClient {
     });
   }
 
+  toggleLight(entityId: string) {
+    return this.request('/api/services/light/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId }),
+    });
+  }
+
   pressButton(entityId: string) {
     return this.request('/api/services/button/press', {
       method: 'POST',

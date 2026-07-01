@@ -13,7 +13,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, writeAudit } from './shared.js';
+import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateLightToolsDeps {
   registry: LightRegistry;
@@ -108,39 +108,73 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
     });
   };
 
-  const turnOn = async (entityId: string) => {
+  const drivePower = async (entityId: string, desired: 'on' | 'off') => {
     const resolved = resolveDevice(entityId);
     if (!resolved.ok) return resolved.failure;
 
-    const { response, state } = await callEntityService(haClient, entityId, 'on');
-    const summary = buildStateSummary(state);
-    if (!hasExpectedPowerState(summary, 'on')) {
-      await auditFailure('turn_on_light', { entity_id: entityId }, resolved.device, 'STATE_NOT_CHANGED', summary);
-      return fail('STATE_NOT_CHANGED', 'Home Assistant 已接收开灯请求，但状态回读未变为 on', {
-        entity_id: entityId,
-        state_after: summary.state_after,
-      });
+    const beforeState = await haClient.getState(entityId);
+    const beforeSummary = buildStateSummary(beforeState);
+    const isLightEntity = entityId.startsWith('light.');
+    const targetState = desired;
+    const initial = await callEntityService(haClient, entityId, desired);
+    const initialSummary = buildStateSummary(initial.state);
+
+    let latest = await waitForExpectedPowerState(() => haClient.getState(entityId), targetState, 10, 300);
+    let fallbackUsed = false;
+
+    if (!latest.confirmed && isLightEntity && beforeSummary.state_after !== targetState) {
+      await haClient.turnOffLight(entityId);
+      fallbackUsed = true;
+      latest = await waitForExpectedPowerState(() => haClient.getState(entityId), targetState, 10, 300);
     }
-    await auditSuccess('turn_on_light', { entity_id: entityId }, resolved.device, summary);
-    return ok({ entity_id: entityId, action: 'turn_on', ...summary, raw: response });
+
+    const confirmed = latest.confirmed;
+    const latestSummary = latest.summary;
+    const toolName = desired === 'on' ? 'turn_on_light' : 'turn_off_light';
+
+    if (!confirmed) {
+      await auditFailure(
+        toolName,
+        {
+          entity_id: entityId,
+          before_state: beforeSummary.state_after,
+          call_state: initialSummary.state_after,
+          fallback_used: fallbackUsed,
+        },
+        resolved.device,
+        'STATE_NOT_CHANGED',
+        latestSummary,
+      );
+    } else {
+      await auditSuccess(
+        toolName,
+        {
+          entity_id: entityId,
+          before_state: beforeSummary.state_after,
+          call_state: initialSummary.state_after,
+          fallback_used: fallbackUsed,
+        },
+        resolved.device,
+        latestSummary,
+      );
+    }
+
+    return ok({
+      entity_id: entityId,
+      action: desired === 'on' ? 'turn_on' : 'turn_off',
+      before_state: beforeSummary.state_after,
+      call_state: initialSummary.state_after,
+      fallback_used: fallbackUsed,
+      ...latestSummary,
+      state_confirmed: confirmed,
+      state_warning: confirmed ? undefined : `实际状态仍为 ${latestSummary.state_after}，但控制请求已发送`,
+      raw: initial.response,
+    });
   };
 
-  const turnOff = async (entityId: string) => {
-    const resolved = resolveDevice(entityId);
-    if (!resolved.ok) return resolved.failure;
+  const turnOn = async (entityId: string) => drivePower(entityId, 'on');
 
-    const { response, state } = await callEntityService(haClient, entityId, 'off');
-    const summary = buildStateSummary(state);
-    if (!hasExpectedPowerState(summary, 'off')) {
-      await auditFailure('turn_off_light', { entity_id: entityId }, resolved.device, 'STATE_NOT_CHANGED', summary);
-      return fail('STATE_NOT_CHANGED', 'Home Assistant 已接收关灯请求，但状态回读未变为 off', {
-        entity_id: entityId,
-        state_after: summary.state_after,
-      });
-    }
-    await auditSuccess('turn_off_light', { entity_id: entityId }, resolved.device, summary);
-    return ok({ entity_id: entityId, action: 'turn_off', ...summary, raw: response });
-  };
+  const turnOff = async (entityId: string) => drivePower(entityId, 'off');
 
   const setBrightness = async (entityId: string, brightness: number) => {
     await registry.tryRefreshFromHomeAssistant(haClient);
@@ -151,11 +185,12 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
       return fail(policyCheck.reason, '亮度控制被拒绝', { entity_id: entityId, brightness });
     }
 
-    const response = await haClient.turnOnLight(entityId, brightness);
+    const normalizedBrightness = Math.max(0, Math.min(255, Math.round(brightness)));
+    const response = await haClient.turnOnLight(entityId, normalizedBrightness);
     const state = await haClient.getState(entityId);
     const summary = buildStateSummary(state);
-    await auditSuccess('set_light_brightness', { entity_id: entityId, brightness }, device!, summary);
-    return ok({ entity_id: entityId, action: 'set_brightness', brightness, ...summary, raw: response });
+    await auditSuccess('set_light_brightness', { entity_id: entityId, brightness: normalizedBrightness }, device!, summary);
+    return ok({ entity_id: entityId, action: 'set_brightness', brightness: normalizedBrightness, ...summary, raw: response });
   };
 
   return {

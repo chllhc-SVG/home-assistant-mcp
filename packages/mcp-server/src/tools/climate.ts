@@ -11,7 +11,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, makeRequestId, now, writeAudit } from './shared.js';
+import { buildStateSummary, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateClimateToolsDeps {
   registry: LightRegistry;
@@ -78,10 +78,11 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const policyCheck = policy.canSetClimateTemperature(resolved.device, parsed.temperature);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调温度控制被拒绝', { entity_id: parsed.entity_id, temperature: parsed.temperature });
 
+      const beforeState = await haClient.getState(parsed.entity_id);
       const response = await haClient.setClimateTemperature(parsed.entity_id, parsed.temperature);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      await auditSuccess('set_climate_temperature', parsed, parsed.entity_id, { ...summary, temperature_after: parsed.temperature });
+      await auditSuccess('set_climate_temperature', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, { ...summary, temperature_after: parsed.temperature });
       return ok({ entity_id: parsed.entity_id, action: 'set_temperature', temperature: parsed.temperature, ...summary, raw: response });
     },
 
@@ -93,11 +94,13 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const policyCheck = policy.canSetClimateHvacMode(resolved.device, parsed.hvac_mode);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调模式控制被拒绝', { entity_id: parsed.entity_id, hvac_mode: parsed.hvac_mode });
 
+      const beforeState = await haClient.getState(parsed.entity_id);
       const response = await haClient.setClimateHvacMode(parsed.entity_id, parsed.hvac_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      await auditSuccess('set_climate_hvac_mode', parsed, parsed.entity_id, { ...summary, hvac_mode_after: parsed.hvac_mode });
-      return ok({ entity_id: parsed.entity_id, action: 'set_hvac_mode', hvac_mode: parsed.hvac_mode, ...summary, raw: response });
+      const confirmed = await waitForExpectedPowerState(() => haClient.getState(parsed.entity_id), parsed.hvac_mode === 'off' ? 'off' : parsed.hvac_mode === 'auto' ? 'auto' : (typeof state.state === 'string' ? state.state as 'on' | 'off' : 'off'), 3, 300);
+      await auditSuccess('set_climate_hvac_mode', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, summary);
+      return ok({ entity_id: parsed.entity_id, action: 'set_hvac_mode', hvac_mode: parsed.hvac_mode, ...summary, state_confirmed: confirmed.confirmed, raw: response });
     },
 
     async set_climate_fan_mode(input: unknown) {
@@ -108,10 +111,11 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const policyCheck = policy.canSetClimateFanMode(resolved.device, parsed.fan_mode);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调风扇模式控制被拒绝', { entity_id: parsed.entity_id, fan_mode: parsed.fan_mode });
 
+      const beforeState = await haClient.getState(parsed.entity_id);
       const response = await haClient.setClimateFanMode(parsed.entity_id, parsed.fan_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      await auditSuccess('set_climate_fan_mode', parsed, parsed.entity_id, { ...summary, fan_mode_after: parsed.fan_mode });
+      await auditSuccess('set_climate_fan_mode', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, summary);
       return ok({ entity_id: parsed.entity_id, action: 'set_fan_mode', fan_mode: parsed.fan_mode, ...summary, raw: response });
     },
 
@@ -123,10 +127,11 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const policyCheck = policy.canSetClimateSwingMode(resolved.device, parsed.swing_mode);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调摆风模式控制被拒绝', { entity_id: parsed.entity_id, swing_mode: parsed.swing_mode });
 
+      const beforeState = await haClient.getState(parsed.entity_id);
       const response = await haClient.setClimateSwingMode(parsed.entity_id, parsed.swing_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      await auditSuccess('set_climate_swing_mode', parsed, parsed.entity_id, { ...summary, swing_mode_after: parsed.swing_mode });
+      await auditSuccess('set_climate_swing_mode', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, summary);
       return ok({ entity_id: parsed.entity_id, action: 'set_swing_mode', swing_mode: parsed.swing_mode, ...summary, raw: response });
     },
   };

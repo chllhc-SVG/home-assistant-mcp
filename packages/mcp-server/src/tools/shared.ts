@@ -27,6 +27,31 @@ export const buildStateSummary = (state: Record<string, unknown>): StateSummary 
 export const hasExpectedPowerState = (summary: StateSummary, action: 'on' | 'off') =>
   summary.state_after === action;
 
+export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export const waitForExpectedPowerState = async (
+  readState: () => Promise<Record<string, unknown>>,
+  expected: 'on' | 'off',
+  retries = 4,
+  delayMs = 250,
+) => {
+  let lastSummary: StateSummary = { state_after: 'unknown' };
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const state = await readState();
+    lastSummary = buildStateSummary(state);
+    if (hasExpectedPowerState(lastSummary, expected)) {
+      return { confirmed: true as const, summary: lastSummary };
+    }
+
+    if (attempt < retries) {
+      await wait(delayMs);
+    }
+  }
+
+  return { confirmed: false as const, summary: lastSummary };
+};
+
 export const writeAudit = async (auditLogger: AuditLogger, event: AuditEvent) => {
   await auditLogger.write(event);
 };

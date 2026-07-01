@@ -34,6 +34,11 @@ const fallbackLogs: LogRecord[] = [
   },
 ];
 
+const formatDeviceLabel = (device: DeviceRecord) => {
+  const shortEntityId = device.entity_id.split('.')[1] ?? device.entity_id;
+  return `${device.display_name} · ${shortEntityId}`;
+};
+
 export const DashboardPage = () => {
   const [form] = Form.useForm();
   const [logs, setLogs] = React.useState<LogRecord[]>(fallbackLogs);
@@ -69,7 +74,10 @@ export const DashboardPage = () => {
       setFailureStats(failureData);
       setLogs(logsData.items.length > 0 ? logsData.items : fallbackLogs);
       setDevices(normalizedDevices);
-      setSelectedDevice((current) => current ?? normalizedDevices[0] ?? null);
+      setSelectedDevice((current) => {
+        if (!current) return normalizedDevices[0] ?? null;
+        return normalizedDevices.find((device) => device.entity_id === current.entity_id) ?? current;
+      });
     } catch {
       setLogs(fallbackLogs);
       setDevices(fallbackDevices);
@@ -112,8 +120,36 @@ export const DashboardPage = () => {
     selectedDevice?.sensor_value,
   ]);
 
+  React.useEffect(() => {
+    if (!selectedDevice) return;
+    const latest = devices.find((device) => device.entity_id === selectedDevice.entity_id);
+    if (latest && latest !== selectedDevice) {
+      setSelectedDevice(latest);
+    }
+  }, [devices, selectedDevice]);
+
   const refreshLogs = async () => {
     await loadData();
+  };
+
+  const refreshSelectedDeviceState = async (device: DeviceRecord) => {
+    try {
+      const state =
+        device.domain === 'sensor'
+          ? await api.getSensorState(device.entity_id)
+          : device.domain === 'climate'
+            ? await api.getClimateState(device.entity_id)
+            : device.domain === 'switch'
+              ? await api.getSwitchState(device.entity_id)
+              : device.domain === 'button'
+                ? await api.getButtonState(device.entity_id)
+                : device.domain === 'number'
+                  ? await api.getNumberState(device.entity_id)
+                  : await api.getLightState(device.entity_id);
+      setSelectedDevice((current) => current ? { ...current, state: String(state.state ?? current.state ?? 'unknown') } : current);
+    } catch {
+      // ignore refresh failures; keep last known state
+    }
   };
 
   const discoverEntities = async () => {
@@ -144,6 +180,7 @@ export const DashboardPage = () => {
       if (action === 'hvac_mode') await api.setClimateHvacMode(selectedDevice.entity_id, hvacMode);
       if (action === 'fan_mode' && fanMode) await api.setClimateFanMode(selectedDevice.entity_id, fanMode);
       if (action === 'swing_mode' && swingMode) await api.setClimateSwingMode(selectedDevice.entity_id, swingMode);
+      await refreshSelectedDeviceState(selectedDevice);
       messageApi.success('控制指令已执行，日志已刷新');
       await refreshLogs();
     } catch (error) {
@@ -324,7 +361,7 @@ export const DashboardPage = () => {
                   style={{ width: '100%' }}
                   value={selectedDevice?.entity_id}
                   placeholder="选择设备"
-                  options={devices.map((device) => ({ label: `${device.display_name} · ${device.entity_id}`, value: device.entity_id }))}
+                  options={devices.map((device) => ({ label: formatDeviceLabel(device), value: device.entity_id }))}
                   onChange={(entityId) => {
                     const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null;
                     setSelectedDevice(nextDevice);
@@ -335,6 +372,7 @@ export const DashboardPage = () => {
                   <Descriptions bordered size="small" column={1}>
                     <Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item>
                     <Descriptions.Item label="实体 ID">{selectedDevice.entity_id}</Descriptions.Item>
+                    <Descriptions.Item label="显示名">{formatDeviceLabel(selectedDevice)}</Descriptions.Item>
                     <Descriptions.Item label="类型">{selectedDevice.domain ?? '-'}</Descriptions.Item>
                     <Descriptions.Item label="当前状态">{selectedDevice.state ?? '-'}</Descriptions.Item>
                     <Descriptions.Item label="房间">{selectedDevice.room ?? '-'}</Descriptions.Item>
