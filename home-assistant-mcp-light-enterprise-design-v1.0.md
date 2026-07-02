@@ -82,11 +82,13 @@ config/lights.json
 
 每个设备都用一条配置描述。比如：
 
+对于某些墙壁开关类 `switch` 设备，如果它们在语义上实际承担的是灯路控制，也可以在 `aliases` 中补充“左右侧灯条”“前后侧灯条”“所有电灯”“关掉所有电灯”等表达，让大模型在“打开/关闭所有电灯”这类意图下能够一起命中并控制。
+
 ```json
 {
   "device_id": "switch_xiaomi_w2_8263_left_switch_service",
-  "display_name": "开关左键",
-  "aliases": ["左键", "开关左键"],
+  "display_name": "左右侧灯条",
+  "aliases": ["左键", "开关左键", "墙壁开关左键", "小米开关左键", "电灯左键", "灯左键", "房间灯左键", "左右侧灯条", "左侧灯条", "左侧灯", "左灯", "左边灯", "所有电灯", "关掉所有电灯"],
   "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
   "domain": "switch",
   "room": "5f_lounge",
