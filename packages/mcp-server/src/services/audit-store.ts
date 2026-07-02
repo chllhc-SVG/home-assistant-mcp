@@ -77,7 +77,7 @@ const matches = (record: AuditEvent, query: AuditQuery) => {
 };
 
 const toRecord = (row: Record<string, unknown>): AuditEvent => ({
-  ...(row as AuditEvent),
+  ...(row as unknown as AuditEvent),
   resolved_device: row.resolved_device as AuditEvent['resolved_device'],
   tool_args: row.tool_args as Record<string, unknown>,
   ha_request: row.ha_request as Record<string, unknown> | undefined,
