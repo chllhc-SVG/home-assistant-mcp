@@ -2,8 +2,8 @@
   "lights": [
     {
       "device_id": "switch_xiaomi_w2_8263_left_switch_service",
-      "display_name": "开关左键",
-      "aliases": ["左键", "开关左键", "墙壁开关左键", "小米开关左键"],
+      "display_name": "左右侧灯条",
+      "aliases": ["左键", "开关左键", "墙壁开关左键", "小米开关左键", "电灯左键", "灯左键", "房间灯左键", "左右侧灯条", "左侧灯条", "左侧灯", "左侧灯光", "左灯", "左边灯", "所有电灯", "关掉所有电灯"],
       "entity_id": "switch.xiaomi_w2_8263_left_switch_service",
       "domain": "switch",
       "room": "5f_lounge",
@@ -15,8 +15,8 @@
     },
     {
       "device_id": "switch_xiaomi_w2_8263_right_switch_service",
-      "display_name": "开关右键",
-      "aliases": ["右键", "开关右键", "墙壁开关右键", "小米开关右键"],
+      "display_name": "前后侧灯条",
+      "aliases": ["右键", "开关右键", "墙壁开关右键", "小米开关右键", "电灯右键", "灯右键", "房间灯右键", "前后侧灯条", "前侧灯条", "后侧灯条", "前侧灯", "后侧灯", "前灯", "后灯", "所有电灯", "关掉所有电灯"],
       "entity_id": "switch.xiaomi_w2_8263_right_switch_service",
       "domain": "switch",
       "room": "5f_lounge",
