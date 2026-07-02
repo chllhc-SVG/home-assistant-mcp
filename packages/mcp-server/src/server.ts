@@ -103,20 +103,20 @@ export const createServer = ({ audit, registry, tools, haClient, mcpRouter }: Se
     res.json({ ok: true, service: 'mcp-server' });
   });
 
-  app.get('/api/admin/stats/overview', (_req, res) => {
-    res.json(ok(audit.summary()));
+  app.get('/api/admin/stats/overview', async (_req, res) => {
+    res.json(ok(await audit.summary()));
   });
 
-  app.get('/api/admin/stats/errors', (_req, res) => {
-    res.json(ok(audit.failureStats()));
+  app.get('/api/admin/stats/errors', async (_req, res) => {
+    res.json(ok(await audit.failureStats()));
   });
 
-  app.get('/api/admin/logs', (req, res) => {
-    res.json(ok(audit.query(toAuditQuery(req.query))));
+  app.get('/api/admin/logs', async (req, res) => {
+    res.json(ok(await audit.query(toAuditQuery(req.query))));
   });
 
-  app.get('/api/admin/logs/:id', (req, res) => {
-    const record = audit.getByRequestId(req.params.id);
+  app.get('/api/admin/logs/:id', async (req, res) => {
+    const record = await audit.getByRequestId(req.params.id);
     if (!record) {
       res.status(404).json(fail('LOG_NOT_FOUND', '日志不存在', { id: req.params.id }));
       return;

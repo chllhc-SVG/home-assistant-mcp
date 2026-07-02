@@ -79,20 +79,27 @@ export const DashboardPage = () => {
   const loadData = React.useCallback(async (query?: URLSearchParams) => {
     setLoading(true);
     try {
-      const [overviewData, failureData, logsData, devicesData] = await Promise.all([
+      const [overviewResult, failureResult, logsResult, devicesResult] = await Promise.allSettled([
         api.getOverview(),
         api.getFailureStats(),
         api.listLogs(query),
         api.listDevices(),
       ]);
-      const normalizedDevices = devicesData.devices.length > 0 ? devicesData.devices : fallbackDevices;
-      setOverview(overviewData);
-      setFailureStats(failureData);
-      setLogs(logsData.items.length > 0 ? logsData.items : fallbackLogs);
+
+      if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
+      if (failureResult.status === 'fulfilled') setFailureStats(failureResult.value);
+      if (logsResult.status === 'fulfilled') {
+        setLogs(logsResult.value.items.length > 0 ? logsResult.value.items : fallbackLogs);
+      } else {
+        setLogs(fallbackLogs);
+      }
+
+      const devices = devicesResult.status === 'fulfilled' ? devicesResult.value.devices : [];
+      const normalizedDevices = devices.length > 0 ? devices : fallbackDevices;
       setDevices(normalizedDevices);
       setSelectedDevice((current) => {
         if (!current) return normalizedDevices[0] ?? null;
-        return normalizedDevices.find((device) => device.entity_id === current.entity_id) ?? current;
+        return normalizedDevices.find((device) => device.entity_id === current.entity_id) ?? normalizedDevices[0] ?? null;
       });
     } catch {
       setLogs(fallbackLogs);
