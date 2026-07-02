@@ -11,6 +11,6 @@ export class AuditLogger {
       id: event.id ?? randomUUID(),
       result_status: event.result_status ?? (event.result.success ? 'success' : 'failure'),
     });
-    console.log(JSON.stringify(event));
+    console.error(JSON.stringify(event));
   }
 }
