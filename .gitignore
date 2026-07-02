@@ -1,24 +1,47 @@
-node_modules
-.env
-.idea/
-node_modules/
-dist/
-*.tsbuildinfo
-config/home-assistant_v2.db-wal
-*.db-wal
+# Dependencies
 
-# Home Assistant runtime files
+node_modules/
+
+# Environment files
+
+.env
+*.env
+
+# Build output
+
+dist/
+build/
+*.tsbuildinfo
+
+# Logs
+
+*.log
+logs/
+
+# Home Assistant local runtime/config secrets
+
 config/.storage/
 config/.HA_VERSION
 config/.ha_run.lock
-config/*.log
-config/*.log.*
+config/secrets.yaml
+
+# Home Assistant database and logs
+
 config/*.db
 config/*.db-shm
 config/*.db-wal
-config/secrets.yaml
+config/*.log
+config/*.log.*
 
-# dependencies / env
-node_modules/
-.env
-*.env
+# IDE
+
+.idea/
+
+# System files
+
+.DS_Store
+Thumbs.db
+
+# Mistaken local file
+
+/git

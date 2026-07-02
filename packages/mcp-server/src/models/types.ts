@@ -181,4 +181,27 @@ export interface AuditSummary {
   successRate: number;
 }
 
+export type DeviceControlAction =
+  | 'turn_on'
+  | 'turn_off'
+  | 'press'
+  | 'set_brightness'
+  | 'set_value'
+  | 'set_temperature'
+  | 'set_hvac_mode'
+  | 'set_fan_mode'
+  | 'set_swing_mode';
+
+export interface DeviceResolutionResult {
+  matched: boolean;
+  confidence: number;
+  candidates: LightDevice[];
+  best_match?: LightDevice;
+}
+
+export interface DeviceListResult {
+  total: number;
+  devices: LightDevice[];
+}
+
 export const createRequestId = (): string => `req_${randomUUID()}`;

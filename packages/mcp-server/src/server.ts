@@ -13,6 +13,7 @@ interface ServerDeps {
   registry: LightRegistry;
   tools: ToolRegistry;
   haClient: HaClient;
+  mcpRouter?: express.Router;
 }
 
 const ok = <T>(data: T) => ({ success: true, data, error: null });
@@ -85,10 +86,11 @@ const serializeDevice = (device: LightDevice) => ({
   enabled: device.enabled,
 });
 
-export const createServer = ({ audit, registry, tools, haClient }: ServerDeps): express.Express => {
+export const createServer = ({ audit, registry, tools, haClient, mcpRouter }: ServerDeps): express.Express => {
   const app = express();
 
   app.use(express.json());
+  if (mcpRouter) app.use('/mcp', mcpRouter);
   app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');

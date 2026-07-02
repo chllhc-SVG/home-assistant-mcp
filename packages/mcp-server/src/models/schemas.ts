@@ -1,5 +1,33 @@
 import { z } from 'zod';
 
+export const listDevicesInputSchema = z.object({
+  domain: z.string().optional(),
+  room: z.string().optional(),
+  keyword: z.string().optional(),
+  enabled_only: z.boolean().optional(),
+});
+
+export const resolveDeviceInputSchema = z.object({
+  query: z.string().min(1),
+  domain: z.string().optional(),
+  room: z.string().optional(),
+});
+
+export const getDeviceStateInputSchema = z.object({
+  entity_id: z.string().min(1),
+});
+
+export const controlDeviceInputSchema = z.object({
+  entity_id: z.string().min(1),
+  action: z.enum(['turn_on', 'turn_off', 'press', 'set_brightness', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode']),
+  brightness: z.coerce.number().finite().optional(),
+  value: z.coerce.number().finite().optional(),
+  temperature: z.coerce.number().finite().optional(),
+  hvac_mode: z.enum(['off', 'heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only']).optional(),
+  fan_mode: z.string().min(1).optional(),
+  swing_mode: z.string().min(1).optional(),
+});
+
 export const listLightsInputSchema = z.object({
   room: z.string().optional(),
   keyword: z.string().optional(),
@@ -42,10 +70,6 @@ export const pressButtonInputSchema = z.object({
 export const setNumberValueInputSchema = z.object({
   entity_id: z.string().min(1),
   value: z.number(),
-});
-
-export const getDeviceStateInputSchema = z.object({
-  entity_id: z.string().min(1),
 });
 
 export const turnOnSwitchInputSchema = z.object({

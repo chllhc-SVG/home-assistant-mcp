@@ -6,9 +6,11 @@ import {
 import type { HaClient } from './ha-client.js';
 
 interface DeviceFilter {
+  domain?: string;
   room?: string;
   keyword?: string;
   supportBrightness?: boolean;
+  enabledOnly?: boolean;
 }
 
 export class LightRegistry {
@@ -20,7 +22,8 @@ export class LightRegistry {
 
   list(filter?: DeviceFilter) {
     return this.devices.filter((device) => {
-      if (!device.enabled) return false;
+      if (filter?.enabledOnly !== false && !device.enabled) return false;
+      if (filter?.domain && device.domain !== filter.domain) return false;
       if (filter?.room && device.room !== filter.room) return false;
       if (filter?.keyword && ![device.display_name, ...device.aliases].some((value) => value.includes(filter.keyword!))) return false;
       if (filter?.supportBrightness !== undefined && device.supports_brightness !== filter.supportBrightness) return false;
@@ -28,9 +31,9 @@ export class LightRegistry {
     });
   }
 
-  resolve(query: string) {
+  resolve(query: string, filter?: Pick<DeviceFilter, 'domain' | 'room'>) {
     const normalized = query.trim();
-    return this.list().filter((device) =>
+    return this.list({ ...filter, enabledOnly: true }).filter((device) =>
       [device.display_name, ...device.aliases].some((value) => value.includes(normalized)),
     );
   }
