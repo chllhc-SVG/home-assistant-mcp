@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { auditStore } from './services/audit-store.js';
 import { createServer as createHttpServer } from './server.js';
 import { createRuntime } from './runtime.js';
@@ -7,7 +8,7 @@ import { createMcpHttpRouter } from './mcp-http.js';
 const runtime = createRuntime();
 
 const boot = async () => {
-  void auditStore.seed(runtime.seedEvents);
+  await auditStore.seed(runtime.seedEvents);
 
   const mcpMode = process.env.MCP_MODE ?? 'http';
 

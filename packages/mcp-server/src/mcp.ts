@@ -24,7 +24,6 @@ type McpTool = {
   inputSchema: Record<string, unknown>;
 };
 
-
 const protocolVersion = '2024-11-05';
 
 const json = (value: unknown) => JSON.stringify(value, null, 2);
@@ -41,7 +40,7 @@ const resultFrom = (value: unknown) => (value && typeof value === 'object' && 's
 const tools: McpTool[] = [
   {
     name: 'resolve_device',
-    description: 'Resolve a natural language device query to matching device candidates.',
+    description: '将自然语言设备查询解析为匹配的设备候选项。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -55,7 +54,7 @@ const tools: McpTool[] = [
   },
   {
     name: 'list_devices',
-    description: 'List controllable devices.',
+    description: '列出可控制的设备。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -69,7 +68,7 @@ const tools: McpTool[] = [
   },
   {
     name: 'get_device_state',
-    description: 'Get the current state of a device.',
+    description: '获取设备的当前状态。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -81,7 +80,7 @@ const tools: McpTool[] = [
   },
   {
     name: 'control_device',
-    description: 'Control a device with a unified action model.',
+    description: '使用统一的动作模型控制设备。',
     inputSchema: {
       type: 'object',
       properties: {
