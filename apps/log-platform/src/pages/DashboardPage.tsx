@@ -1,10 +1,10 @@
 import React from 'react';
-import { Alert, Button, Card, Col, Descriptions, Drawer, Form, Input, Layout, Row, Select, Slider, Space, Statistic, Table, Tag, Typography, message } from 'antd';
-import { ApiOutlined, BulbOutlined, CompassOutlined, FilterOutlined, PoweroffOutlined, ReloadOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Alert, Badge, Button, Card, Col, Descriptions, Drawer, Empty, Form, Input, Layout, Row, Select, Slider, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { ApiOutlined, AppstoreOutlined, BulbOutlined, CheckCircleOutlined, CompassOutlined, FilterOutlined, FireOutlined, PoweroffOutlined, ReloadOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { api, type DeviceRecord, type DiscoveredEntity, type LogRecord } from '../api/client';
 
 const logColumns = [
-  { title: '时间', dataIndex: 'timestamp', width: 220 },
+  { title: '时间', dataIndex: 'timestamp', width: 220, render: (value: string) => formatBeijingTime(value) },
   { title: '设备', render: (_: unknown, record: LogRecord) => record.resolved_device?.display_name ?? record.device_name ?? '-' },
   { title: '工具', dataIndex: 'tool_name' },
   { title: '意图', dataIndex: 'intent', render: (value?: string) => value ?? '-' },
@@ -37,6 +37,22 @@ const fallbackLogs: LogRecord[] = [
 const formatDeviceLabel = (device: DeviceRecord) => {
   const shortEntityId = device.entity_id.split('.')[1] ?? device.entity_id;
   return `${device.display_name} · ${shortEntityId}`;
+};
+
+const formatBeijingTime = (value?: string) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date).replaceAll('/', '-');
 };
 
 export const DashboardPage = () => {
@@ -225,8 +241,16 @@ export const DashboardPage = () => {
     await loadData(params);
   };
 
+  const resetFilters = () => {
+    form.resetFields();
+    void loadData();
+  };
+
+  const filterValues = Form.useWatch([], form) ?? {};
+  const logKeywordCount = [filterValues.keyword, filterValues.tool_name, filterValues.device_name, filterValues.status].filter(Boolean).length;
+
   const renderControlPanel = () => {
-    if (!selectedDevice) return null;
+    if (!selectedDevice) return <Empty description="请选择一个设备开始控制" />;
 
     const domain = selectedDevice.domain;
     const supportsLightBrightness = domain === 'light' && selectedDevice.supports_brightness;
@@ -236,138 +260,116 @@ export const DashboardPage = () => {
     const supportsSwingMode = domain === 'climate' && selectedDevice.supports_swing_mode && (selectedDevice.swing_modes?.length ?? 0) > 0;
 
     return (
-      <Space direction="vertical" size={14} style={{ width: '100%' }}>
-        {(domain === 'light' || domain === 'switch') ? (
-          <Space wrap>
-            <Button type="primary" icon={<BulbOutlined />} loading={controlLoading} onClick={() => void control('on')}>打开</Button>
-            <Button danger icon={<PoweroffOutlined />} loading={controlLoading} onClick={() => void control('off')}>关闭</Button>
-          </Space>
-        ) : null}
-
-        {supportsLightBrightness ? (
-          <div>
-            <Typography.Text strong>亮度：{brightness}</Typography.Text>
-            <Slider min={0} max={255} value={brightness} onChange={setBrightness} />
-            <Button loading={controlLoading} onClick={() => void control('brightness')}>设置亮度</Button>
+      <div className="control-panel">
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <div className="status-badge">
+            <Badge status={selectedDevice.enabled === false ? 'error' : 'success'} />
+            <Typography.Text strong>{selectedDevice.display_name}</Typography.Text>
+            <Tag>{selectedDevice.domain ?? '-'}</Tag>
           </div>
-        ) : null}
 
-        {domain === 'button' ? (
-          <Button type="primary" loading={controlLoading} onClick={() => void control('press')}>按下</Button>
-        ) : null}
-
-        {domain === 'number' && selectedDevice.supports_value ? (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Typography.Text strong>数值：{numberValue}</Typography.Text>
-            <Slider
-              min={selectedDevice.value_min ?? 0}
-              max={selectedDevice.value_max ?? 100}
-              step={selectedDevice.value_step ?? 1}
-              value={numberValue}
-              onChange={setNumberValue}
-            />
-            <Button loading={controlLoading} onClick={() => void control('value')}>设置数值</Button>
+          <Space wrap>
+            {(domain === 'light' || domain === 'switch') ? (
+              <>
+                <Button type="primary" icon={<BulbOutlined />} loading={controlLoading} onClick={() => void control('on')}>打开</Button>
+                <Button danger icon={<PoweroffOutlined />} loading={controlLoading} onClick={() => void control('off')}>关闭</Button>
+              </>
+            ) : null}
+            {domain === 'button' ? <Button type="primary" icon={<AppstoreOutlined />} loading={controlLoading} onClick={() => void control('press')}>按下</Button> : null}
+            <Button icon={<CheckCircleOutlined />} loading={controlLoading} onClick={() => void queryState()}>查询状态</Button>
           </Space>
-        ) : null}
 
-        {domain === 'climate' ? (
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            {supportsTemperature ? (
-              <div>
-                <Typography.Text strong>目标温度：{targetTemperature}{selectedDevice.temperature_unit ?? '°C'}</Typography.Text>
-                <Slider
-                  min={selectedDevice.temperature_min ?? 16}
-                  max={selectedDevice.temperature_max ?? 30}
-                  step={selectedDevice.temperature_step ?? 1}
-                  value={targetTemperature}
-                  onChange={setTargetTemperature}
-                />
-                <Button loading={controlLoading} onClick={() => void control('temperature')}>设置温度</Button>
-              </div>
-            ) : null}
-            {supportsHvacMode ? (
-              <Space>
-                <Select
-                  style={{ width: 160 }}
-                  value={hvacMode}
-                  options={(selectedDevice.hvac_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
-                  onChange={setHvacMode}
-                />
-                <Button loading={controlLoading} onClick={() => void control('hvac_mode')}>设置模式</Button>
+          {supportsLightBrightness ? (
+            <Card size="small" bordered={false} style={{ borderRadius: 16 }} title={<span className="module-title"><FireOutlined />亮度控制</span>}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Typography.Text strong>亮度：{brightness}</Typography.Text>
+                <Slider min={0} max={255} value={brightness} onChange={setBrightness} />
+                <Button loading={controlLoading} onClick={() => void control('brightness')}>设置亮度</Button>
               </Space>
-            ) : null}
-            {supportsFanMode ? (
-              <Space>
-                <Select
-                  style={{ width: 160 }}
-                  value={fanMode}
-                  options={(selectedDevice.fan_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
-                  onChange={setFanMode}
-                />
-                <Button loading={controlLoading} onClick={() => void control('fan_mode')}>设置风扇</Button>
-              </Space>
-            ) : null}
-            {supportsSwingMode ? (
-              <Space>
-                <Select
-                  style={{ width: 160 }}
-                  value={swingMode}
-                  options={(selectedDevice.swing_modes ?? []).map((mode) => ({ value: mode, label: mode }))}
-                  onChange={setSwingMode}
-                />
-                <Button loading={controlLoading} onClick={() => void control('swing_mode')}>设置摆风</Button>
-              </Space>
-            ) : null}
-          </Space>
-        ) : null}
+            </Card>
+          ) : null}
 
-        {domain === 'sensor' ? (
-          <Typography.Text>
-            当前值：{selectedDevice.sensor_value ?? selectedDevice.state ?? '-'}{selectedDevice.sensor_unit ?? ''}
-          </Typography.Text>
-        ) : null}
+          {domain === 'number' && selectedDevice.supports_value ? (
+            <Card size="small" bordered={false} style={{ borderRadius: 16 }} title={<span className="module-title"><AppstoreOutlined />数值控制</span>}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Typography.Text strong>数值：{numberValue}</Typography.Text>
+                <Slider min={selectedDevice.value_min ?? 0} max={selectedDevice.value_max ?? 100} step={selectedDevice.value_step ?? 1} value={numberValue} onChange={setNumberValue} />
+                <Button loading={controlLoading} onClick={() => void control('value')}>设置数值</Button>
+              </Space>
+            </Card>
+          ) : null}
 
-        <Button loading={controlLoading} onClick={() => void queryState()}>查询状态</Button>
-      </Space>
+          {domain === 'climate' ? (
+            <Card size="small" bordered={false} style={{ borderRadius: 16 }} title={<span className="module-title"><CompassOutlined />空调控制</span>}>
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                {supportsTemperature ? (
+                  <div>
+                    <Typography.Text strong>目标温度：{targetTemperature}{selectedDevice.temperature_unit ?? '°C'}</Typography.Text>
+                    <Slider min={selectedDevice.temperature_min ?? 16} max={selectedDevice.temperature_max ?? 30} step={selectedDevice.temperature_step ?? 1} value={targetTemperature} onChange={setTargetTemperature} />
+                    <Button loading={controlLoading} onClick={() => void control('temperature')}>设置温度</Button>
+                  </div>
+                ) : null}
+                {supportsHvacMode ? (
+                  <Space>
+                    <Select style={{ width: 180 }} value={hvacMode} options={(selectedDevice.hvac_modes ?? []).map((mode) => ({ value: mode, label: mode }))} onChange={setHvacMode} />
+                    <Button loading={controlLoading} onClick={() => void control('hvac_mode')}>设置模式</Button>
+                  </Space>
+                ) : null}
+                {supportsFanMode ? (
+                  <Space>
+                    <Select style={{ width: 180 }} value={fanMode} options={(selectedDevice.fan_modes ?? []).map((mode) => ({ value: mode, label: mode }))} onChange={setFanMode} />
+                    <Button loading={controlLoading} onClick={() => void control('fan_mode')}>设置风扇</Button>
+                  </Space>
+                ) : null}
+                {supportsSwingMode ? (
+                  <Space>
+                    <Select style={{ width: 180 }} value={swingMode} options={(selectedDevice.swing_modes ?? []).map((mode) => ({ value: mode, label: mode }))} onChange={setSwingMode} />
+                    <Button loading={controlLoading} onClick={() => void control('swing_mode')}>设置摆风</Button>
+                  </Space>
+                ) : null}
+              </Space>
+            </Card>
+          ) : null}
+
+          {domain === 'sensor' ? (
+            <Card size="small" bordered={false} style={{ borderRadius: 16 }} title={<span className="module-title"><CompassOutlined />传感器状态</span>}>
+              <Typography.Text>
+                当前值：{selectedDevice.sensor_value ?? selectedDevice.state ?? '-'}{selectedDevice.sensor_unit ?? ''}
+              </Typography.Text>
+            </Card>
+          ) : null}
+        </Space>
+      </div>
     );
   };
 
   return (
-    <Layout.Content style={{ minHeight: '100vh', padding: 24, background: 'linear-gradient(135deg, #eef4ff 0%, #f8fbff 45%, #fff7ed 100%)' }}>
+    <Layout.Content className="app-shell">
       {contextHolder}
       <Space direction="vertical" size={18} style={{ width: '100%' }}>
-        <Card bordered={false} style={{ borderRadius: 24, background: 'linear-gradient(120deg, #0f172a, #1d4ed8)', color: '#fff', boxShadow: '0 20px 50px rgba(15,23,42,.18)' }}>
+        <Card bordered={false} className="page-header-card" style={{ background: 'linear-gradient(120deg, #0f172a, #1d4ed8)', color: '#fff' }}>
           <Row align="middle" gutter={16}>
             <Col flex="auto">
-              <Typography.Title level={2} style={{ color: '#fff', marginBottom: 4 }}>Home Assistant 设备控制中心</Typography.Title>
-              <Typography.Text style={{ color: 'rgba(255,255,255,.76)' }}>集成 MCP 工具调用、设备控制、审计日志、状态追踪和 Home Assistant 映射。</Typography.Text>
+              <div className="hero-kicker">TS MCP Runtime</div>
+              <Typography.Title level={2} className="hero-title">Home Assistant 设备控制中心</Typography.Title>
+              <Typography.Text className="hero-desc">集成 MCP 工具调用、设备控制、审计日志、状态追踪和 Home Assistant 映射。</Typography.Text>
             </Col>
-            <Col><Tag color="processing" style={{ padding: '6px 12px', borderRadius: 999 }}>TS MCP Runtime</Tag></Col>
+            <Col><Tag color="processing" style={{ padding: '6px 12px', borderRadius: 999 }}>Online</Tag></Col>
           </Row>
         </Card>
 
         <Row gutter={16}>
-          <Col xs={24} sm={12} lg={6}><Card bordered={false}><Statistic prefix={<ApiOutlined />} title="总请求数" value={overview.total} /></Card></Col>
-          <Col xs={24} sm={12} lg={6}><Card bordered={false}><Statistic prefix={<ThunderboltOutlined />} title="成功率" value={overview.successRate} suffix="%" precision={1} /></Card></Col>
-          <Col xs={24} sm={12} lg={6}><Card bordered={false}><Statistic title="成功次数" value={overview.success} /></Card></Col>
-          <Col xs={24} sm={12} lg={6}><Card bordered={false}><Statistic title="失败次数" value={overview.failure} /></Card></Col>
+          <Col xs={24} sm={12} lg={6}><Card bordered={false} className="metric-card"><Statistic prefix={<ApiOutlined />} title="总请求数" value={overview.total} /></Card></Col>
+          <Col xs={24} sm={12} lg={6}><Card bordered={false} className="metric-card"><Statistic prefix={<ThunderboltOutlined />} title="成功率" value={overview.successRate} suffix="%" precision={1} /></Card></Col>
+          <Col xs={24} sm={12} lg={6}><Card bordered={false} className="metric-card"><Statistic title="成功次数" value={overview.success} /></Card></Col>
+          <Col xs={24} sm={12} lg={6}><Card bordered={false} className="metric-card"><Statistic title="失败次数" value={overview.failure} /></Card></Col>
         </Row>
 
         <Row gutter={16}>
-          <Col xs={24} lg={10}>
-            <Card title={<Space><BulbOutlined />具体设备控制</Space>} bordered={false} style={{ borderRadius: 20 }}>
+          <Col xs={24} lg={24}>
+            <Card title={<Space><BulbOutlined />具体设备控制</Space>} bordered={false} className="section-card device-descriptions">
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                <Select
-                  style={{ width: '100%' }}
-                  value={selectedDevice?.entity_id}
-                  placeholder="选择设备"
-                  options={devices.map((device) => ({ label: formatDeviceLabel(device), value: device.entity_id }))}
-                  onChange={(entityId) => {
-                    const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null;
-                    setSelectedDevice(nextDevice);
-                    if (typeof nextDevice?.brightness === 'number') setBrightness(nextDevice.brightness);
-                  }}
-                />
+                <Select style={{ width: '100%' }} value={selectedDevice?.entity_id} placeholder="选择设备" options={devices.map((device) => ({ label: formatDeviceLabel(device), value: device.entity_id }))} onChange={(entityId) => { const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null; setSelectedDevice(nextDevice); if (typeof nextDevice?.brightness === 'number') setBrightness(nextDevice.brightness); }} />
                 {selectedDevice ? (
                   <Descriptions bordered size="small" column={1}>
                     <Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item>
@@ -388,80 +390,56 @@ export const DashboardPage = () => {
               </Space>
             </Card>
           </Col>
+        </Row>
 
-          <Col xs={24} lg={14}>
-            <Card title={<Space><FilterOutlined />日志查询</Space>} bordered={false} style={{ borderRadius: 20 }}>
+        <Row gutter={16} align="top">
+          <Col xs={24} lg={24}>
+            <Card title={<Space><FilterOutlined />日志查询</Space>} bordered={false} className="section-card" extra={<Tag color={logKeywordCount > 0 ? 'blue' : 'default'}>{logKeywordCount > 0 ? `已筛选 ${logKeywordCount}` : '未筛选'}</Tag>}>
               <Form form={form} component={false}>
-                <Row gutter={[12, 12]}>
-                  <Col xs={24} md={6}><Form.Item name="keyword" noStyle><Input placeholder="关键字" /></Form.Item></Col>
-                  <Col xs={24} md={6}><Form.Item name="tool_name" noStyle><Input placeholder="工具名" /></Form.Item></Col>
-                  <Col xs={24} md={6}><Form.Item name="device_name" noStyle><Input placeholder="设备名" /></Form.Item></Col>
-                  <Col xs={24} md={4}><Form.Item name="status" noStyle><Select placeholder="状态" allowClear options={[{ value: 'success', label: '成功' }, { value: 'failure', label: '失败' }]} /></Form.Item></Col>
-                  <Col xs={24} md={2}><Button type="primary" icon={<SearchOutlined />} onClick={onSearch} loading={loading}>查</Button></Col>
+                <Row gutter={[12, 12]} align="middle">
+                  <Col xs={24} md={7}><Form.Item name="keyword" noStyle><Input allowClear placeholder="关键字 / 用户输入" /></Form.Item></Col>
+                  <Col xs={24} md={5}><Form.Item name="tool_name" noStyle><Input allowClear placeholder="工具名" /></Form.Item></Col>
+                  <Col xs={24} md={5}><Form.Item name="device_name" noStyle><Input allowClear placeholder="设备名" /></Form.Item></Col>
+                  <Col xs={24} md={4}><Form.Item name="status" noStyle><Select allowClear placeholder="结果" options={[{ value: 'success', label: '成功' }, { value: 'failure', label: '失败' }]} /></Form.Item></Col>
+                  <Col xs={24} md={3}><Space style={{ width: '100%', display: 'flex' }}><Button type="primary" icon={<SearchOutlined />} onClick={onSearch} loading={loading} style={{ width: '100%' }}>查询</Button><Button onClick={resetFilters} style={{ width: '100%' }}>重置</Button></Space></Col>
                 </Row>
               </Form>
-              <Alert style={{ marginTop: 16 }} type="success" showIcon message="设备控制后会自动刷新日志，日志来自后端真实 Admin API。" />
+              <Alert style={{ marginTop: 16 }} type="info" showIcon message="支持按关键字、工具名、设备名和结果状态筛选。点击“重置”可恢复全部日志。" />
             </Card>
+
+            <Card title="控制与审计日志" bordered={false} className="section-card" style={{ marginTop: 16 }} extra={<Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button>}>
+              <Table columns={logColumns} dataSource={logs} rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: true, pageSizeOptions: ['8', '16', '32'] }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
+            </Card>
+
+            <Row gutter={16} style={{ marginTop: 16 }}>
+              <Col xs={24} lg={12}>
+                <Card title="系统状态" bordered={false} className="section-card">
+                  <Space direction="vertical">
+                    <Tag color="green">MCP Server Online</Tag>
+                    <Tag color="green">Admin API Online</Tag>
+                    <Tag color="blue">Home Assistant API Mapping Ready</Tag>
+                  </Space>
+                </Card>
+              </Col>
+              <Col xs={24} lg={12}>
+                <Card title="失败统计" bordered={false} className="section-card">
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {Object.entries(failureStats.byErrorCode).length === 0 ? <Typography.Text type="secondary">暂无失败</Typography.Text> : null}
+                    {Object.entries(failureStats.byErrorCode).map(([key, value]) => <Tag key={key} color="red">{key}: {value}</Tag>)}
+                  </Space>
+                </Card>
+              </Col>
+            </Row>
           </Col>
         </Row>
 
-        <Row gutter={16}>
-          <Col xs={24} lg={16}>
-            <Card title="控制与审计日志" bordered={false} style={{ borderRadius: 20 }} extra={<Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button>}>
-              <Table columns={logColumns} dataSource={logs} rowKey="id" loading={loading} pagination={{ pageSize: 8 }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
-            </Card>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <Card title="系统状态" bordered={false} style={{ borderRadius: 20 }}>
-                <Space direction="vertical">
-                  <Tag color="green">MCP Server Online</Tag>
-                  <Tag color="green">Admin API Online</Tag>
-                  <Tag color="blue">Home Assistant API Mapping Ready</Tag>
-                </Space>
-              </Card>
-              <Card title="失败统计" bordered={false} style={{ borderRadius: 20 }}>
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  {Object.entries(failureStats.byErrorCode).length === 0 ? <Typography.Text type="secondary">暂无失败</Typography.Text> : null}
-                  {Object.entries(failureStats.byErrorCode).map(([key, value]) => <Tag key={key} color="red">{key}: {value}</Tag>)}
-                </Space>
-              </Card>
-            </Space>
-          </Col>
-        </Row>
-
-        <Card title={<Space><CompassOutlined />Home Assistant 设备自动发现</Space>} bordered={false} style={{ borderRadius: 20 }} extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverEntities()}>发现设备</Button>}>
+        <Card title={<Space><CompassOutlined />Home Assistant 设备自动发现</Space>} bordered={false} className="section-card" extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverEntities()}>发现设备</Button>}>
           <Alert type="info" showIcon style={{ marginBottom: 16 }} message="这里展示 Home Assistant 中实际存在的 light、switch、button、number、climate、sensor 实体。若要出现在控制下拉框，需要把对应 entity_id 写入 config/lights.json 白名单。" />
-          <Table
-            rowKey="entity_id"
-            dataSource={discoveredEntities}
-            pagination={{ pageSize: 6 }}
-            columns={[
-              { title: '实体 ID', dataIndex: 'entity_id' },
-              { title: '名称', dataIndex: 'friendly_name' },
-              { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> },
-              { title: '状态', dataIndex: 'state', render: (value: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value}</Tag> },
-              { title: '亮度能力', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '未知/不支持'}</Tag> },
-              { title: '温度能力', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
-            ]}
-          />
+          <Table rowKey="entity_id" dataSource={discoveredEntities} pagination={{ pageSize: 6 }} columns={[{ title: '实体 ID', dataIndex: 'entity_id' }, { title: '名称', dataIndex: 'friendly_name' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '状态', dataIndex: 'state', render: (value: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value}</Tag> }, { title: '亮度能力', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '未知/不支持'}</Tag> }, { title: '温度能力', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }]} />
         </Card>
 
-        <Card title="Home Assistant 控制映射表" bordered={false} style={{ borderRadius: 20 }}>
-          <Table
-            rowKey="device_id"
-            dataSource={devices}
-            pagination={false}
-            columns={[
-              { title: '设备名', dataIndex: 'display_name' },
-              { title: 'entity_id', dataIndex: 'entity_id' },
-              { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> },
-              { title: '房间', dataIndex: 'room' },
-              { title: '亮度', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
-              { title: '温度', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> },
-              { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> },
-            ]}
-          />
+        <Card title="Home Assistant 控制映射表" bordered={false} className="section-card">
+          <Table rowKey="device_id" dataSource={devices} pagination={false} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: 'entity_id', dataIndex: 'entity_id' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '房间', dataIndex: 'room' }, { title: '亮度', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }, { title: '温度', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
         </Card>
       </Space>
 
