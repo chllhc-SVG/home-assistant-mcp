@@ -7,6 +7,7 @@
 - Home Assistant 不在本仓库内启动
 - 本仓库只负责 MCP 控制层与前端系统页面
 - 通过根目录 `.env` 连接你自己的 Home Assistant 地址与 Token
+- 控制链路分为：启动装配层、配置与设备映射层、策略与 Schema 校验层、工具层、Home Assistant 访问层、HTTP 对外服务层、审计与记录层
 
 ## 快速启动
 

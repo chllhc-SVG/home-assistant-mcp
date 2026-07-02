@@ -179,19 +179,142 @@ config/lights.json
 
 ---
 
-## 7. 这些工具怎么工作的
+## 7. 分层架构说明
 
-工具内部流程大致是：
+这套代码不是把所有逻辑写在一个地方，而是拆成了多个职责清晰的层。
 
-1. 先从白名单里找到设备
-2. 检查这个设备是否允许控制
-3. 调 Home Assistant API
-4. 再读一次状态，确认有没有成功
-5. 把结果写进审计日志
+### 7.1 启动装配层
+
+对应 `packages/mcp-server/src/main.ts`。
+
+这一层只负责启动时把各个组件拼起来：
+
+- 读取配置
+- 构建设备注册表
+- 创建策略引擎
+- 创建 Home Assistant 客户端
+- 创建审计器
+- 创建工具集合
+- 启动 HTTP 服务
+
+它属于**程序启动阶段**，不是每次用户请求都会重新执行。
+
+### 7.2 配置与设备映射层
+
+对应 `packages/mcp-server/src/config.ts` 和 `config/lights.json`。
+
+这一层负责：
+
+- 从 `.env` 读取 Home Assistant 地址和 Token
+- 从 `config/lights.json` 读取设备白名单
+- 把显示名、别名、`entity_id`、设备域、房间、能力等信息统一登记
+
+它决定了系统“认识哪些设备”。
+
+### 7.3 校验与策略层
+
+对应 `packages/mcp-server/src/services/policy-engine.ts` 和工具内部的设备判断逻辑。
+
+这一层负责：
+
+- 判断设备是否存在
+- 判断设备是否启用
+- 判断该设备是否允许控制
+- 判断某个动作是否允许执行
+- 限制风险较高或不支持的操作
+
+它相当于“门禁”和“审批员”。
+
+### 7.4 Schema 校验层
+
+对应 `packages/mcp-server/src/models/schemas.ts`。
+
+这一层负责校验工具输入是否合法，例如：
+
+- `entity_id` 是否必填
+- `brightness` 是否在 0~255 之间
+- `hvac_mode` 是否是允许的枚举值
+- `temperature` 是否是数字
+
+Schema 用来保证工具收到的是结构正确的参数。
+
+### 7.5 工具层 / MCP 能力层
+
+对应 `packages/mcp-server/src/tools/*.ts` 和 `packages/mcp-server/src/tools/index.ts`。
+
+这一层是大模型真正能看到并调用的能力层，比如：
+
+- `turn_on_light`
+- `turn_off_light`
+- `set_light_brightness`
+- `turn_on_switch`
+- `press_button`
+- `set_climate_temperature`
+
+工具层会编排下面几个动作：
+
+1. 先做 Schema 解析
+2. 再做设备和策略校验
+3. 然后调用 Home Assistant
+4. 最后读回状态并记录审计
+
+### 7.6 Home Assistant 访问层
+
+对应 `packages/mcp-server/src/services/ha-client.ts`。
+
+这一层负责真正发 HTTP 请求到 Home Assistant，例如：
+
+- `light.turn_on`
+- `light.turn_off`
+- `switch.turn_on`
+- `climate.set_temperature`
+
+它只负责“怎么请求 Home Assistant”，不负责业务判断。
+
+### 7.7 HTTP 对外服务层
+
+对应 `packages/mcp-server/src/server.ts`。
+
+这一层把系统暴露成可访问的 HTTP 接口，供前端页面、管理后台或外部程序调用。
+
+它包含：
+
+- 健康检查接口
+- 设备查询接口
+- 设备发现接口
+- 灯、开关、按钮、数值、空调的控制接口
+- 日志和统计接口
+
+### 7.8 审计与记录层
+
+对应 `packages/mcp-server/src/services/audit-store.ts`、`packages/mcp-server/src/services/audit-logger.ts`，以及工具内部的 `writeAudit(...)`。
+
+这一层负责：
+
+- 记录每次调用
+- 记录工具名、设备 ID、请求参数和结果
+- 统计成功/失败次数
+- 统计失败原因
+- 便于排查问题和回放行为
+
+### 7.9 这些层的真实执行顺序
+
+如果从一次设备控制请求来看，更准确的顺序是：
+
+1. 用户通过文本或语音表达需求
+2. 大模型理解意图
+3. 设备解析/匹配
+4. 调用 MCP 工具
+5. 工具内部做 Schema 校验
+6. 工具内部做策略校验
+7. 工具内部通过 Home Assistant 访问层发请求
+8. 工具回读状态确认结果
+9. 工具写入审计记录
+10. 返回结果给上层
 
 简单理解就是：
 
-> **先找设备，再控制，再确认，再记录。**
+> **先理解意图，再找设备，再做校验，再执行，再确认，再记录。**
 
 ---
 
@@ -299,6 +422,15 @@ POST /api/control/climates/{entityId}/swing-mode
 ## 9. 大模型后续怎么接入
 
 如果后面要让大模型调用这个系统，推荐把上面的 HTTP 接口包装成模型工具。
+
+### 9.1 工具入参 / 出参说明
+
+下面列的是大模型在 MCP 层最常用的工具输入与输出说明。实际返回通常统一为：
+
+- 成功：`{ success: true, data: ..., error: null }`
+- 失败：`{ success: false, data: null, error: { error_code, message, details } }`
+
+#### 灯光相关
 
 ### 推荐工具映射
 
