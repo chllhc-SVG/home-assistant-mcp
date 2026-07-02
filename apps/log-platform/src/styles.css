@@ -14,20 +14,41 @@ body {
     linear-gradient(180deg, #f7faff 0%, #f4f7fb 100%);
 }
 
-.app-shell {
-  position: relative;
+.dashboard-shell {
+  display: flex;
   min-height: 100vh;
-  padding: 28px;
 }
 
-.app-shell::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image: linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.22), transparent 70%);
+.dashboard-nav {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 280px;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+  box-shadow: 8px 0 30px rgba(15, 23, 42, 0.16);
+  padding: 18px 14px;
+}
+
+.dashboard-nav .ant-menu {
+  background: transparent;
+  border-inline-end: 0;
+}
+
+.dashboard-nav .ant-menu-item {
+  border-radius: 12px;
+  margin-inline: 8px;
+}
+
+.sider-brand {
+  padding: 12px 12px 20px;
+}
+
+.app-shell {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 28px;
 }
 
 .page-header-card {
@@ -65,16 +86,6 @@ body {
   padding: 18px;
   background: linear-gradient(180deg, rgba(22, 119, 255, 0.06), rgba(255, 255, 255, 0.88));
   border: 1px solid rgba(22, 119, 255, 0.14);
-}
-
-.device-descriptions .ant-descriptions-view {
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.table-card .ant-table {
-  border-radius: 16px;
-  overflow: hidden;
 }
 
 .status-badge {
@@ -123,6 +134,16 @@ body {
 }
 
 @media (max-width: 992px) {
+  .dashboard-shell {
+    flex-direction: column;
+  }
+
+  .dashboard-nav {
+    position: relative;
+    width: 100%;
+    min-height: auto;
+  }
+
   .app-shell {
     padding: 16px;
   }
