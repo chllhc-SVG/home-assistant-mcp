@@ -458,6 +458,12 @@ POST /api/control/climates/{entityId}/swing-mode
 ### 一键启动
 
 ```bash
+pnpm start
+```
+
+或者：
+
+```bash
 pnpm docker:dev
 ```
 
@@ -469,6 +475,7 @@ pnpm docker:dev
 - 打印访问地址
 - 尝试打开浏览器
 
+这个启动方式已经改成跨平台的 `node scripts/start-dev.mjs`，可在 Windows、macOS 和 Linux 上一致使用，不再依赖 `cmd /c start.bat`。
 ### 访问地址
 
 - 系统页面：`http://127.0.0.1:5173`

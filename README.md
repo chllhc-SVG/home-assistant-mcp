@@ -22,7 +22,13 @@ HOME_ASSISTANT_TIMEOUT_MS=15000
 
 ### 2. 一键启动
 
-Windows 下直接运行：
+直接运行：
+
+```bash
+pnpm start
+```
+
+或者：
 
 ```bash
 pnpm docker:dev
@@ -34,6 +40,8 @@ pnpm docker:dev
 - 构建并启动 Docker 服务
 - 打印访问地址
 - 尝试自动打开浏览器
+
+这个命令已改为跨平台脚本，可在 Windows、macOS 和 Linux 上直接使用，不再依赖 `cmd /c start.bat`。
 
 如果你只想后台启动容器，也可以使用：
 
@@ -74,4 +82,4 @@ docker compose down
 - `packages/mcp-server`：MCP 控制层后端
 - `apps/log-platform`：前端系统页面
 - `config/lights.json`：可控制设备白名单，历史命名保留，内容已支持多设备域
-- `start.bat` / `start.ps1`：Windows 一键启动脚本
+- `start.bat` / `start.ps1`：本地一键启动脚本，内部已切换为跨平台逻辑
