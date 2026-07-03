@@ -11,20 +11,12 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d home_assistant_mcp"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
+      - ./data/postgres:/var/lib/postgresql/data
     restart: unless-stopped
 
   mcp-server:
     container_name: home-assistant-mcp-server
-    build:
-      context: .
-      dockerfile: packages/mcp-server/Dockerfile
+    image: home-assistant-mcp-server:imac
     env_file:
       - ./.env
     environment:
@@ -40,15 +32,12 @@ services:
       - "4000:4000"
       - "4010:4010"
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     restart: unless-stopped
 
   log-platform:
     container_name: home-assistant-log-platform
-    build:
-      context: .
-      dockerfile: apps/log-platform/Dockerfile
+    image: home-assistant-log-platform:imac
     environment:
       VITE_ADMIN_API_BASE_URL: /api
     ports:
@@ -56,6 +45,3 @@ services:
     depends_on:
       - mcp-server
     restart: unless-stopped
-
-volumes:
-  postgres_data:

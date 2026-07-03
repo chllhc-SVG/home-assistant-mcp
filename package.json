@@ -11,6 +11,7 @@
     "dev": "pnpm -r --parallel dev",
     "start": "node scripts/start-dev.mjs",
     "docker:dev": "node scripts/start-dev.mjs",
+    "package:imac": "bash scripts/package-imac.sh",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

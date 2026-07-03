@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const root = process.cwd();
 const envPath = resolve(root, '.env');
 const envExamplePath = resolve(root, '.env.example');
-const frontUrl = 'http://127.0.0.1:5173';
+const frontUrl = 'http://127.0.0.1:5175';
 
 if (!existsSync(envPath)) {
   if (existsSync(envExamplePath)) {
