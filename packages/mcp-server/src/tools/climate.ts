@@ -98,7 +98,7 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const response = await haClient.setClimateHvacMode(parsed.entity_id, parsed.hvac_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      const confirmed = await waitForExpectedPowerState(() => haClient.getState(parsed.entity_id), parsed.hvac_mode === 'off' ? 'off' : parsed.hvac_mode === 'auto' ? 'auto' : (typeof state.state === 'string' ? state.state as 'on' | 'off' : 'off'), 3, 300);
+      const confirmed = await waitForExpectedPowerState(() => haClient.getState(parsed.entity_id), parsed.hvac_mode === 'off' ? 'off' : 'on', 3, 300);
       await auditSuccess('set_climate_hvac_mode', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, summary);
       return ok({ entity_id: parsed.entity_id, action: 'set_hvac_mode', hvac_mode: parsed.hvac_mode, ...summary, state_confirmed: confirmed.confirmed, raw: response });
     },
