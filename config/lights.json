@@ -27,6 +27,19 @@
       "enabled": true
     },
     {
+      "device_id": "switch_xiaomi_w2_2de4_right_switch_service",
+      "display_name": "筒灯",
+      "aliases": ["筒灯", "开筒灯", "打开筒灯", "关闭筒灯", "筒灯开关", "筒灯右键", "右筒灯", "右侧筒灯", "右边筒灯", "小米筒灯", "客厅筒灯", "5F筒灯", "5f筒灯", "筒灯开关右键", "右侧开关", "灯"],
+      "entity_id": "switch.xiaomi_w2_2de4_right_switch_service",
+      "domain": "switch",
+      "room": "5f_lounge",
+      "type": "switch",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
       "device_id": "light_xiaomi_w2_8263_all_switch",
       "display_name": "墙壁开关全部指示灯",
       "aliases": ["全部开关指示灯", "全部指示灯", "开关全部指示灯", "不是房间灯"],
@@ -79,6 +92,19 @@
       "enabled": true
     },
     {
+      "device_id": "switch_xiaomi_w2_2de4_left_switch_service",
+      "display_name": "测试间主灯",
+      "aliases": ["测试间主灯", "测试间灯", "主灯", "筒灯", "筒灯开关", "开筒灯", "关筒灯", "打开筒灯", "关闭筒灯", "测试间两个主灯", "测试间主灯总开关", "主灯总开关", "A2双灯总开关"],
+      "entity_id": "switch.xiaomi_w2_2de4_left_switch_service",
+      "domain": "switch",
+      "room": "5f_lounge",
+      "type": "switch",
+      "supports_brightness": false,
+      "capabilities": ["turn_on", "turn_off", "get_state"],
+      "risk_level": "low",
+      "enabled": true
+    },
+    {
       "device_id": "light_aimore_230915_ca16_light",
       "display_name": "测试间主灯A",
       "aliases": ["测试间灯A", "测试间主灯A", "主灯A", "A2灯A", "灯A", "Smart Dimmable Light A2"],
@@ -89,7 +115,7 @@
       "supports_brightness": true,
       "capabilities": ["turn_on", "turn_off", "set_brightness", "get_state"],
       "risk_level": "low",
-      "enabled": true
+      "enabled": false
     },
     {
       "device_id": "light_aimore_230915_6a5d_light",
@@ -102,7 +128,7 @@
       "supports_brightness": true,
       "capabilities": ["turn_on", "turn_off", "set_brightness", "get_state"],
       "risk_level": "low",
-      "enabled": true
+      "enabled": false
     },
     {
       "device_id": "switch_aimore_230915_ca16_flex_switch",

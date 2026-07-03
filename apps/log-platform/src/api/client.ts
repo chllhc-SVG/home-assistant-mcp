@@ -73,6 +73,7 @@ export interface DeviceRecord {
   capabilities?: string[];
   risk_level?: string;
   enabled?: boolean;
+  stateless?: boolean;
 }
 
 export interface DiscoveredEntity {
