@@ -37,7 +37,7 @@ const readString = (value: unknown) => (typeof value === 'string' ? value : unde
 const readBoolean = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 const resultFrom = (value: unknown) => (value && typeof value === 'object' && 'success' in value ? value : { success: true, data: value, error: null });
 
-const tools: McpTool[] = [
+export const mcpTools: McpTool[] = [
   {
     name: 'resolve_device',
     description: '将自然语言设备查询解析为匹配的设备候选项。',
@@ -97,6 +97,82 @@ const tools: McpTool[] = [
         swing_mode: { type: 'string' },
       },
       required: ['entity_id', 'action'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_climate_devices',
+    description: '列出可控制的空调设备。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        room: { type: 'string' },
+        keyword: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_climate_state',
+    description: '获取空调设备的当前状态。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string' },
+      },
+      required: ['entity_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_climate_temperature',
+    description: '设置空调目标温度。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string' },
+        temperature: { type: 'number' },
+      },
+      required: ['entity_id', 'temperature'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_climate_hvac_mode',
+    description: '设置空调运行模式。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string' },
+        hvac_mode: { type: 'string' },
+      },
+      required: ['entity_id', 'hvac_mode'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_climate_fan_mode',
+    description: '设置空调风扇模式。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string' },
+        fan_mode: { type: 'string' },
+      },
+      required: ['entity_id', 'fan_mode'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_climate_swing_mode',
+    description: '设置空调摆风模式。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string' },
+        swing_mode: { type: 'string' },
+      },
+      required: ['entity_id', 'swing_mode'],
       additionalProperties: false,
     },
   },
@@ -179,6 +255,13 @@ export const dispatchTool = async (runtime: Runtime, name: string, rawParams: un
     return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported action for ${domain}`, { entity_id: entityId, action: parsed.action }), true);
   }
 
+  if (name === 'list_climate_devices') return wrapToolResult(resultFrom(await runtime.tools.list_climate_devices(params)));
+  if (name === 'get_climate_state') return wrapToolResult(resultFrom(await runtime.tools.get_climate_state(params)));
+  if (name === 'set_climate_temperature') return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature(params)));
+  if (name === 'set_climate_hvac_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_hvac_mode(params)));
+  if (name === 'set_climate_fan_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_fan_mode(params)));
+  if (name === 'set_climate_swing_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_swing_mode(params)));
+
   return wrapToolResult(fail('INVALID_ARGUMENT', `Unknown tool: ${name}`), true);
 };
 
@@ -246,7 +329,7 @@ export const startMcp = async (runtime: Runtime) => {
     }
 
     if (request.method === 'tools/list') {
-      return toJsonRpcResult(request.id ?? null, { tools });
+      return toJsonRpcResult(request.id ?? null, { tools: mcpTools });
     }
 
     if (request.method === 'tools/call') {
