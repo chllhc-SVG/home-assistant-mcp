@@ -13,7 +13,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
+import { buildStateSummary, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateLightToolsDeps {
   registry: LightRegistry;
@@ -75,12 +75,12 @@ const callEntityService = async (
   if (action === 'on') {
     const responses = await Promise.all(entityIds.map((id) => (isLightEntity ? haClient.turnOnLight(id) : haClient.turnOn(id))));
     const states = await Promise.all(entityIds.map((id) => haClient.getState(id)));
-    return { response: responses, state: states.at(-1) };
+    return { response: responses, state: states[0] ?? { state: 'unknown' } };
   }
 
   const responses = await Promise.all(entityIds.map((id) => (isLightEntity ? haClient.turnOffLight(id) : haClient.turnOff(id))));
   const states = await Promise.all(entityIds.map((id) => haClient.getState(id)));
-  return { response: responses, state: states.at(-1) };
+  return { response: responses, state: states[0] ?? { state: 'unknown' } };
 };
 
 export const createLightTools = ({ registry, policy, haClient, auditLogger }: CreateLightToolsDeps) => {
@@ -219,6 +219,22 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
 
   const turnOff = async (entityId: string) => drivePower(entityId, 'off');
 
+  const getMasterSwitchState = async (): Promise<Record<string, unknown>> => {
+    try {
+      return await haClient.getState(TEST_ROOM_MASTER_SWITCH);
+    } catch {
+      return { state: 'unknown' };
+    }
+  };
+
+  const ensureMasterSwitchOn = async () => {
+    const switchState = await getMasterSwitchState();
+    if (!isSwitchOn(switchState.state)) {
+      await haClient.turnOn(TEST_ROOM_MASTER_SWITCH);
+    }
+    return switchState.state ?? 'unknown';
+  };
+
   const setBrightness = async (entityId: string, brightness: number) => {
     await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(entityId);
@@ -231,17 +247,13 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
     const normalizedBrightness = Math.max(0, Math.min(255, Math.round(brightness)));
     const coupledEntities = getCoupledEntities(entityId);
     const primaryEntityId = resolvePrimaryLightEntity(entityId);
-    const switchState = await haClient.getState(TEST_ROOM_MASTER_SWITCH).catch(() => undefined);
-
-    if (!isSwitchOn(switchState?.state)) {
-      await haClient.turnOn(TEST_ROOM_MASTER_SWITCH);
-    }
+    const masterSwitchStateBefore = await ensureMasterSwitchOn();
 
     const response = await Promise.all(coupledEntities.map((id) => haClient.turnOnLight(id, normalizedBrightness)));
     const state = await haClient.getState(primaryEntityId);
     const summary = buildStateSummary(state);
-    await auditSuccess('set_light_brightness', { entity_id: entityId, brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: switchState?.state ?? 'unknown' }, device!, summary);
-    return ok({ entity_id: entityId, action: 'set_brightness', brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: switchState?.state ?? 'unknown', ...summary, raw: response });
+    await auditSuccess('set_light_brightness', { entity_id: entityId, brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore }, device!, summary);
+    return ok({ entity_id: entityId, action: 'set_brightness', brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore, ...summary, raw: response });
   };
 
   return {
@@ -281,7 +293,7 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
         const switchState = await haClient.getState(TEST_ROOM_MASTER_SWITCH).catch(() => undefined);
         if (!isSwitchOn(switchState?.state)) {
           return ok({
-            entity_id: groupPrimaryDisplayName,
+            entity_id: parsed.entity_id,
             state: 'off',
             friendly_name: groupPrimaryDisplayName,
             master_switch: TEST_ROOM_MASTER_SWITCH,
@@ -319,6 +331,25 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
 
       if (parsed.brightness !== undefined) {
         return setBrightness(parsed.entity_id, parsed.brightness);
+      }
+
+      if (parsed.color_temp_kelvin !== undefined) {
+        await registry.tryRefreshFromHomeAssistant(haClient);
+        const device = registry.getByEntityId(parsed.entity_id);
+        const policyCheck = policy.canSetBrightness(device, 0);
+
+        if (!policyCheck.allowed) {
+          return fail(policyCheck.reason, '色温控制被拒绝', { entity_id: parsed.entity_id, color_temp_kelvin: parsed.color_temp_kelvin });
+        }
+
+        const coupledEntities = getCoupledEntities(parsed.entity_id);
+        const primaryEntityId = resolvePrimaryLightEntity(parsed.entity_id);
+        const masterSwitchStateBefore = await ensureMasterSwitchOn();
+        const response = await Promise.all(coupledEntities.map((id) => haClient.turnOnLight(id, undefined, parsed.color_temp_kelvin)));
+        const state = await haClient.getState(primaryEntityId);
+        const summary = buildStateSummary(state);
+        await auditSuccess('set_light_state', { entity_id: parsed.entity_id, color_temp_kelvin: parsed.color_temp_kelvin, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore }, device!, summary);
+        return ok({ entity_id: parsed.entity_id, action: 'set_color_temp', color_temp_kelvin: parsed.color_temp_kelvin, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore, ...summary, raw: response });
       }
 
       return turnOn(parsed.entity_id);

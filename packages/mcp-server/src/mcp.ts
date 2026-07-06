@@ -80,16 +80,17 @@ export const mcpTools: McpTool[] = [
   },
   {
     name: 'control_device',
-    description: '使用统一的动作模型控制设备。',
+    description: '使用统一的动作模型控制设备。对 light 设备可控制开关、亮度和色温（Kelvin）；对 climate 设备可控制温度、模式和风速。色温只用于灯光，不用于空调。',
     inputSchema: {
       type: 'object',
       properties: {
         entity_id: { type: 'string' },
         action: {
           type: 'string',
-          enum: ['turn_on', 'turn_off', 'press', 'set_brightness', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode'],
+          enum: ['turn_on', 'turn_off', 'press', 'set_brightness', 'set_color_temp', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode'],
         },
         brightness: { type: 'number' },
+        color_temp_kelvin: { type: 'number' },
         value: { type: 'number' },
         temperature: { type: 'number' },
         hvac_mode: { type: 'string' },
@@ -238,21 +239,30 @@ export const dispatchTool = async (runtime: Runtime, name: string, rawParams: un
     const entityId = parsed.entity_id;
     const domain = entityId.split('.')[0];
 
-    if (parsed.action === 'turn_on') {
-      return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_on_switch({ entity_id: entityId }) : runtime.tools.turn_on_light({ entity_id: entityId }))));
+    switch (parsed.action) {
+      case 'turn_on':
+        return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_on_switch({ entity_id: entityId }) : runtime.tools.turn_on_light({ entity_id: entityId }))));
+      case 'turn_off':
+        return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_off_switch({ entity_id: entityId }) : runtime.tools.turn_off_light({ entity_id: entityId }))));
+      case 'press':
+        return wrapToolResult(resultFrom(await runtime.tools.press_button({ entity_id: entityId })));
+      case 'set_brightness':
+        return wrapToolResult(resultFrom(await runtime.tools.set_light_brightness({ entity_id: entityId, brightness: parsed.brightness ?? 0 })));
+      case 'set_color_temp':
+        return wrapToolResult(resultFrom(await runtime.tools.set_light_state({ entity_id: entityId, state: 'on', color_temp_kelvin: parsed.color_temp_kelvin ?? 4000 })));
+      case 'set_value':
+        return wrapToolResult(resultFrom(await runtime.tools.set_number_value({ entity_id: entityId, value: parsed.value ?? 0 })));
+      case 'set_temperature':
+        return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ entity_id: entityId, temperature: parsed.temperature ?? 0 })));
+      case 'set_hvac_mode':
+        return wrapToolResult(resultFrom(await runtime.tools.set_climate_hvac_mode({ entity_id: entityId, hvac_mode: parsed.hvac_mode ?? 'auto' })));
+      case 'set_fan_mode':
+        return wrapToolResult(resultFrom(await runtime.tools.set_climate_fan_mode({ entity_id: entityId, fan_mode: parsed.fan_mode ?? '' })));
+      case 'set_swing_mode':
+        return wrapToolResult(resultFrom(await runtime.tools.set_climate_swing_mode({ entity_id: entityId, swing_mode: parsed.swing_mode ?? '' })));
+      default:
+        return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported action for ${domain}`, { entity_id: entityId, action: parsed.action }), true);
     }
-    if (parsed.action === 'turn_off') {
-      return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_off_switch({ entity_id: entityId }) : runtime.tools.turn_off_light({ entity_id: entityId }))));
-    }
-    if (parsed.action === 'press') return wrapToolResult(resultFrom(await runtime.tools.press_button({ entity_id: entityId })));
-    if (parsed.action === 'set_brightness') return wrapToolResult(resultFrom(await runtime.tools.set_light_brightness({ entity_id: entityId, brightness: parsed.brightness ?? 0 })));
-    if (parsed.action === 'set_value') return wrapToolResult(resultFrom(await runtime.tools.set_number_value({ entity_id: entityId, value: parsed.value ?? 0 })));
-    if (parsed.action === 'set_temperature') return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ entity_id: entityId, temperature: parsed.temperature ?? 0 })));
-    if (parsed.action === 'set_hvac_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_hvac_mode({ entity_id: entityId, hvac_mode: parsed.hvac_mode ?? 'auto' })));
-    if (parsed.action === 'set_fan_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_fan_mode({ entity_id: entityId, fan_mode: parsed.fan_mode ?? '' })));
-    if (parsed.action === 'set_swing_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_swing_mode({ entity_id: entityId, swing_mode: parsed.swing_mode ?? '' })));
-
-    return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported action for ${domain}`, { entity_id: entityId, action: parsed.action }), true);
   }
 
   if (name === 'list_climate_devices') return wrapToolResult(resultFrom(await runtime.tools.list_climate_devices(params)));

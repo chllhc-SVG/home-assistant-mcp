@@ -19,8 +19,9 @@ export const getDeviceStateInputSchema = z.object({
 
 export const controlDeviceInputSchema = z.object({
   entity_id: z.string().min(1),
-  action: z.enum(['turn_on', 'turn_off', 'press', 'set_brightness', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode']),
+  action: z.enum(['turn_on', 'turn_off', 'press', 'set_brightness', 'set_color_temp', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode']),
   brightness: z.coerce.number().finite().optional(),
+  color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000).optional(),
   value: z.coerce.number().finite().optional(),
   temperature: z.coerce.number().finite().optional(),
   hvac_mode: z.enum(['off', 'heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only']).optional(),
@@ -61,6 +62,12 @@ export const setLightStateInputSchema = z.object({
   entity_id: z.string().min(1),
   state: z.enum(['on', 'off']),
   brightness: brightnessSchema.optional(),
+  color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000).optional(),
+});
+
+export const setLightColorTempInputSchema = z.object({
+  entity_id: z.string().min(1),
+  color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000),
 });
 
 export const pressButtonInputSchema = z.object({

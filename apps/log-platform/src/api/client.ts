@@ -50,6 +50,8 @@ export interface DeviceRecord {
   value_step?: number;
   supported_color_modes?: string[];
   color_mode?: string;
+  color_temp_min_kelvin?: number;
+  color_temp_max_kelvin?: number;
   brightness?: number;
   supports_temperature?: boolean;
   supports_hvac_mode?: boolean;
@@ -117,6 +119,7 @@ export interface ControlResult {
   state_after?: string;
   brightness?: number;
   brightness_after?: number;
+  color_temp_kelvin?: number;
   temperature?: number;
   hvac_mode?: string;
   fan_mode?: string;
@@ -169,7 +172,7 @@ export const api = {
   turnOnLight: (entityId: string) => request<ControlResult>(`/api/control/lights/${encodeURIComponent(entityId)}/turn-on`, { method: 'POST', body: '{}' }),
   turnOffLight: (entityId: string) => request<ControlResult>(`/api/control/lights/${encodeURIComponent(entityId)}/turn-off`, { method: 'POST', body: '{}' }),
   setLightBrightness: (entityId: string, brightness: number) => request<ControlResult>(`/api/control/lights/${encodeURIComponent(entityId)}/brightness`, { method: 'POST', body: JSON.stringify({ brightness }) }),
-  setLightState: (entityId: string, state: 'on' | 'off', brightness?: number) => request<ControlResult>(`/api/control/lights/${encodeURIComponent(entityId)}/state`, { method: 'POST', body: JSON.stringify({ state, brightness }) }),
+  setLightState: (entityId: string, state: 'on' | 'off', brightness?: number, color_temp_kelvin?: number) => request<ControlResult>(`/api/control/lights/${encodeURIComponent(entityId)}/state`, { method: 'POST', body: JSON.stringify({ state, brightness, color_temp_kelvin }) }),
   turnOnSwitch: (entityId: string) => request<ControlResult>(`/api/control/switches/${encodeURIComponent(entityId)}/turn-on`, { method: 'POST', body: '{}' }),
   turnOffSwitch: (entityId: string) => request<ControlResult>(`/api/control/switches/${encodeURIComponent(entityId)}/turn-off`, { method: 'POST', body: '{}' }),
   getSwitchState: (entityId: string) => request<Record<string, unknown>>(`/api/control/switches/${encodeURIComponent(entityId)}/state`),

@@ -8,6 +8,8 @@ import type {
 const KNOWN_DOMAINS = new Set<DeviceDomain>(['light', 'switch', 'button', 'number', 'climate', 'sensor']);
 const BRIGHTNESS_COLOR_MODES = new Set(['brightness', 'color_temp', 'hs', 'xy', 'rgb', 'rgbw', 'rgbww', 'white']);
 const LEGACY_BRIGHTNESS_FEATURE = 1;
+const COLOR_TEMP_KELVIN_MIN_KEYS = ['min_color_temp_kelvin', 'min_kelvin', 'min_mireds'] as const;
+const COLOR_TEMP_KELVIN_MAX_KEYS = ['max_color_temp_kelvin', 'max_kelvin', 'max_mireds'] as const;
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
@@ -23,6 +25,19 @@ const asStringOrNumber = (value: unknown): string | number | undefined =>
 
 const hasBrightnessColorMode = (mode: string | undefined) =>
   typeof mode === 'string' && BRIGHTNESS_COLOR_MODES.has(mode);
+
+const readColorTempKelvin = (attributes: Record<string, unknown>, keys: readonly string[]) => {
+  for (const key of keys) {
+    const value = asNumber(attributes[key]);
+    if (typeof value === 'number') {
+      if (key.endsWith('mireds')) {
+        return Math.round(1000000 / value);
+      }
+      return value;
+    }
+  }
+  return undefined;
+};
 
 export const normalizeDeviceCapabilities = (device: LightDevice): LightDevice => {
   const capabilities = new Set<DeviceCapability>(device.capabilities);
@@ -150,6 +165,8 @@ export const extractEntityCapabilitySnapshot = (
     supports_swing_mode: domain === 'climate' && swingModes.length > 0,
     supported_color_modes: supportedColorModes,
     color_mode: colorMode,
+    color_temp_min_kelvin: readColorTempKelvin(attributes, COLOR_TEMP_KELVIN_MIN_KEYS),
+    color_temp_max_kelvin: readColorTempKelvin(attributes, COLOR_TEMP_KELVIN_MAX_KEYS),
     brightness,
     value_min: asNumber(attributes.min),
     value_max: asNumber(attributes.max),

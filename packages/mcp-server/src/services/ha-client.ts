@@ -118,11 +118,41 @@ export class HaClient {
     });
   }
 
-  turnOnLight(entityId: string, brightness?: number) {
-    return this.request('/api/services/light/turn_on', {
-      method: 'POST',
-      body: JSON.stringify({ entity_id: entityId, ...(brightness === undefined ? {} : { brightness }) }),
-    });
+  async turnOnLight(entityId: string, brightness?: number, colorTempKelvin?: number) {
+    if (colorTempKelvin === undefined) {
+      return this.request('/api/services/light/turn_on', {
+        method: 'POST',
+        body: JSON.stringify({ entity_id: entityId, ...(brightness === undefined ? {} : { brightness }) }),
+      });
+    }
+
+    return this.setLightColorTemp(entityId, colorTempKelvin, brightness);
+  }
+
+  async setLightColorTemp(entityId: string, colorTempKelvin: number, brightness?: number) {
+    const basePayload = { entity_id: entityId, ...(brightness === undefined ? {} : { brightness }) };
+    const candidates = [
+      { ...basePayload, color_temp_kelvin: colorTempKelvin },
+      { ...basePayload, kelvin: colorTempKelvin },
+      { ...basePayload, color_temp: Math.round(1000000 / colorTempKelvin) },
+    ];
+
+    let lastError: unknown;
+    for (const payload of candidates) {
+      try {
+        return await this.request('/api/services/light/turn_on', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof HomeAssistantError) || error.code !== 'SERVICE_FAILED' || error.status !== 400) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   turnOffLight(entityId: string) {

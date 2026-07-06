@@ -61,6 +61,8 @@ const serializeDevice = (device: LightDevice) => ({
   value_step: device.value_step,
   supported_color_modes: device.supported_color_modes,
   color_mode: device.color_mode,
+  color_temp_min_kelvin: device.color_temp_min_kelvin,
+  color_temp_max_kelvin: device.color_temp_max_kelvin,
   brightness: device.brightness,
   supports_temperature: device.supports_temperature,
   supports_hvac_mode: device.supports_hvac_mode,
@@ -198,6 +200,7 @@ export const createServer = ({ audit, registry, tools, haClient, mcpRouter }: Se
         entity_id: req.params.entityId,
         state: req.body?.state,
         brightness: req.body?.brightness === undefined ? undefined : Number(req.body.brightness),
+        color_temp_kelvin: req.body?.color_temp_kelvin === undefined ? undefined : Number(req.body.color_temp_kelvin),
       });
       res.json(result);
     } catch (error) {

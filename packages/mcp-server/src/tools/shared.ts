@@ -7,20 +7,33 @@ export const now = () => new Date().toISOString();
 export type StateSummary = {
   state_after: string;
   brightness_after?: number;
+  color_temp_kelvin_after?: number;
+  color_temp_mired_after?: number;
   temperature_after?: number;
   hvac_mode_after?: string;
   fan_mode_after?: string;
   swing_mode_after?: string;
 };
 
+const resolveColorTempKelvin = (attributes: Record<string, unknown> | undefined) => {
+  if (!attributes) return undefined;
+  if (typeof attributes.color_temp_kelvin === 'number') return attributes.color_temp_kelvin;
+  if (typeof attributes.color_temp === 'number' && attributes.color_temp > 0) return Math.round(1000000 / attributes.color_temp);
+  return undefined;
+};
+
 export const buildStateSummary = (state: Record<string, unknown>): StateSummary => {
   const current = typeof state.state === 'string' ? state.state : 'unknown';
   const attributes = state.attributes as Record<string, unknown> | undefined;
   const brightness = typeof attributes?.brightness === 'number' ? attributes.brightness : undefined;
+  const colorTempKelvin = resolveColorTempKelvin(attributes);
+  const colorTempMired = typeof attributes?.color_temp === 'number' ? attributes.color_temp : undefined;
 
   return {
     state_after: current,
     ...(typeof brightness === 'number' ? { brightness_after: brightness } : {}),
+    ...(typeof colorTempKelvin === 'number' ? { color_temp_kelvin_after: colorTempKelvin } : {}),
+    ...(typeof colorTempMired === 'number' ? { color_temp_mired_after: colorTempMired } : {}),
   };
 };
 

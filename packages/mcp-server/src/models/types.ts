@@ -51,6 +51,8 @@ export interface ControllableDevice {
   friendly_name?: string;
   supported_color_modes?: string[];
   color_mode?: string;
+  color_temp_min_kelvin?: number;
+  color_temp_max_kelvin?: number;
   brightness?: number;
   capability_source?: CapabilitySource;
   capabilities: DeviceCapability[];
@@ -186,6 +188,7 @@ export type DeviceControlAction =
   | 'turn_off'
   | 'press'
   | 'set_brightness'
+  | 'set_color_temp'
   | 'set_value'
   | 'set_temperature'
   | 'set_hvac_mode'
