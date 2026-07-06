@@ -13,6 +13,33 @@ interface DeviceFilter {
   enabledOnly?: boolean;
 }
 
+const groupedTestRoomLightIds = new Set(['light.aimore_230915_ca16_light', 'light.aimore_230915_6a5d_light']);
+const groupedTestRoomLightDisplayName = '测试间主灯';
+
+const isGroupedTestRoomLight = (device: LightDevice) => groupedTestRoomLightIds.has(device.entity_id);
+
+const mergeGroupedTestRoomLights = (devices: LightDevice[]) => {
+  const grouped = devices.filter(isGroupedTestRoomLight);
+  const others = devices.filter((device) => !isGroupedTestRoomLight(device));
+
+  if (grouped.length === 0) return devices;
+
+  const representative = grouped[0];
+  const aliases = Array.from(new Set(grouped.flatMap((device) => [device.display_name, ...device.aliases])));
+
+  return [
+    {
+      ...representative,
+      display_name: groupedTestRoomLightDisplayName,
+      aliases,
+      entity_id: representative.entity_id,
+      supports_brightness: grouped.some((device) => device.supports_brightness),
+      enabled: grouped.some((device) => device.enabled),
+    },
+    ...others,
+  ];
+};
+
 export class LightRegistry {
   private devices: LightDevice[];
 
@@ -21,7 +48,7 @@ export class LightRegistry {
   }
 
   list(filter?: DeviceFilter) {
-    return this.devices.filter((device) => {
+    const filtered = this.devices.filter((device) => {
       if (filter?.enabledOnly !== false && !device.enabled) return false;
       if (filter?.domain && device.domain !== filter.domain) return false;
       if (filter?.room && device.room !== filter.room) return false;
@@ -29,11 +56,13 @@ export class LightRegistry {
       if (filter?.supportBrightness !== undefined && device.supports_brightness !== filter.supportBrightness) return false;
       return true;
     });
+
+    return mergeGroupedTestRoomLights(filtered);
   }
 
   resolve(query: string, filter?: Pick<DeviceFilter, 'domain' | 'room'>) {
     const normalized = query.trim();
-    return this.list({ ...filter, enabledOnly: true }).filter((device) =>
+    return mergeGroupedTestRoomLights(this.list({ ...filter, enabledOnly: true })).filter((device) =>
       [device.display_name, ...device.aliases].some((value) => value.includes(normalized)),
     );
   }
