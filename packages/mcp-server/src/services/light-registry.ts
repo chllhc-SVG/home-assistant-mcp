@@ -46,13 +46,23 @@ const mergeGroupedTestRoomLights = (devices: LightDevice[]) => {
 
 export class LightRegistry {
   private devices: LightDevice[];
+  private exposureDeviceIds: Set<string> | null = null;
 
   constructor(devices: LightDevice[]) {
     this.devices = devices.map(normalizeDeviceCapabilities);
   }
 
+  setExposure(deviceIds: string[]) {
+    this.exposureDeviceIds = deviceIds.length > 0 ? new Set(deviceIds) : null;
+  }
+
+  getExposure() {
+    return this.exposureDeviceIds ? Array.from(this.exposureDeviceIds) : [];
+  }
+
   list(filter?: DeviceFilter) {
     const filtered = this.devices.filter((device) => {
+      if (this.exposureDeviceIds && !this.exposureDeviceIds.has(device.entity_id)) return false;
       if (filter?.enabledOnly !== false && !device.enabled) return false;
       if (filter?.domain && device.domain !== filter.domain) return false;
       if (filter?.room && device.room !== filter.room) return false;

@@ -43,6 +43,7 @@ export interface DeviceRecord {
   type?: 'light' | 'switch' | 'button' | 'number' | 'climate' | 'sensor';
   state?: string;
   friendly_name?: string;
+  exposed?: boolean;
   supports_brightness?: boolean;
   supports_value?: boolean;
   value_min?: number;
@@ -113,6 +114,11 @@ export interface DiscoveredEntity {
 
 export type DiscoveredLight = DiscoveredEntity;
 
+export interface DeviceExposureConfig {
+  rooms: Array<{ room: string; enabled: boolean }>;
+  devices: string[];
+}
+
 export interface ControlResult {
   entity_id: string;
   action: string;
@@ -166,6 +172,8 @@ export const api = {
   listLogs: (params = new URLSearchParams()) => request<PaginatedLogResponse>(`/api/admin/logs?${params.toString()}`),
   getLogById: (id: string) => request<LogRecord>(`/api/admin/logs/${id}`),
   listDevices: () => request<{ devices: DeviceRecord[] }>('/api/admin/devices'),
+  getDeviceExposure: () => request<{ exposure: string[] }>('/api/admin/device-exposure'),
+  saveDeviceExposure: (payload: DeviceExposureConfig) => request<{ saved: boolean }>('/api/admin/device-exposure', { method: 'POST', body: JSON.stringify(payload) }),
   discoverLights: () => request<{ lights: DiscoveredLight[] }>('/api/admin/ha/lights/discover'),
   discoverEntities: () => request<{ entities: DiscoveredEntity[] }>('/api/admin/ha/entities/discover'),
   getLightState: (entityId: string) => request<Record<string, unknown>>(`/api/control/lights/${encodeURIComponent(entityId)}/state`),

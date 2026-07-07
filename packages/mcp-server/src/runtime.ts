@@ -47,6 +47,8 @@ export interface Runtime {
 export const createRuntime = (): Runtime => {
   const config = loadConfig();
   const registry = new LightRegistry(config.lights);
+  registry.setExposure(config.exposure.devices);
+
   const policy = new PolicyEngine();
   const haClient = new HaClient(config.homeAssistantBaseUrl, config.homeAssistantToken, config.timeoutMs);
   const auditLogger = new AuditLogger(auditStore);

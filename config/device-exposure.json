@@ -1,0 +1,9 @@
+{
+  "rooms": [
+    {
+      "room": "5f_lounge",
+      "enabled": true
+    }
+  ],
+  "devices": []
+}

@@ -1,10 +1,11 @@
 import express from 'express';
-import type { AuditQuery, LightDevice } from './models/types.js';
+import type { AuditQuery, DeviceExposureConfig, LightDevice } from './models/types.js';
 import type { auditStore } from './services/audit-store.js';
 import type { LightRegistry } from './services/light-registry.js';
 import type { createTools } from './tools/index.js';
 import type { HaClient } from './services/ha-client.js';
 import { HomeAssistantError } from './services/ha-client.js';
+import { saveDeviceExposure } from './config.js';
 
 type ToolRegistry = ReturnType<typeof createTools>;
 
@@ -129,6 +130,69 @@ export const createServer = ({ audit, registry, tools, haClient, mcpRouter }: Se
   app.get('/api/admin/devices', async (_req, res) => {
     const devices = await registry.listWithHomeAssistantState(haClient);
     res.json(ok({ devices: devices.map(serializeDevice) }));
+  });
+
+  app.get('/api/admin/device-exposure', async (_req, res) => {
+    res.json(ok({ exposure: registry.getExposure() }));
+  });
+
+  app.post('/api/admin/device-exposure', async (req, res) => {
+    try {
+      const payload = req.body as DeviceExposureConfig;
+      saveDeviceExposure(payload);
+      registry.setExposure(payload.devices);
+
+      const discovered = await haClient.discoverEntities();
+      const discoveredByEntityId = new Map(discovered.map((device) => [device.entity_id, device]));
+      for (const entityId of payload.devices) {
+        const snapshot = discoveredByEntityId.get(entityId);
+        if (!snapshot) continue;
+        registry.upsert({
+          device_id: entityId,
+          display_name: snapshot.friendly_name,
+          aliases: [],
+          entity_id: entityId,
+          domain: (snapshot.domain ?? entityId.split('.')[0]) as LightDevice['domain'],
+          room: payload.rooms.find((room) => room.enabled)?.room ?? '',
+          type: (snapshot.domain ?? entityId.split('.')[0]) as LightDevice['type'],
+          state: snapshot.state,
+          friendly_name: snapshot.friendly_name,
+          supports_brightness: snapshot.supports_brightness,
+          supports_value: snapshot.supports_value,
+          supports_temperature: snapshot.supports_temperature,
+          supports_hvac_mode: snapshot.supports_hvac_mode,
+          supports_fan_mode: snapshot.supports_fan_mode,
+          supports_swing_mode: snapshot.supports_swing_mode,
+          value_min: snapshot.value_min,
+          value_max: snapshot.value_max,
+          value_step: snapshot.value_step,
+          temperature_min: snapshot.temperature_min,
+          temperature_max: snapshot.temperature_max,
+          temperature_step: snapshot.temperature_step,
+          temperature_unit: snapshot.temperature_unit,
+          current_temperature: snapshot.current_temperature,
+          target_temperature: snapshot.target_temperature,
+          hvac_mode: snapshot.hvac_mode,
+          hvac_modes: snapshot.hvac_modes,
+          fan_mode: snapshot.fan_mode,
+          fan_modes: snapshot.fan_modes,
+          swing_mode: snapshot.swing_mode,
+          swing_modes: snapshot.swing_modes,
+          sensor_unit: snapshot.sensor_unit,
+          sensor_value: snapshot.sensor_value,
+          supported_color_modes: snapshot.supported_color_modes,
+          color_mode: snapshot.color_mode,
+          brightness: snapshot.brightness,
+          capabilities: [],
+          risk_level: 'low',
+          enabled: true,
+        });
+      }
+
+      res.json(ok({ saved: true }));
+    } catch (error) {
+      res.status(400).json(failFromError('保存设备暴露配置失败', error));
+    }
   });
 
   app.get('/api/admin/ha/lights/discover', async (_req, res) => {

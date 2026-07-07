@@ -24,6 +24,7 @@ export interface ControllableDevice {
   domain: DeviceDomain;
   room: string;
   type: DeviceDomain;
+  enabled: boolean;
   supports_brightness: boolean;
   supports_value?: boolean;
   supports_temperature?: boolean;
@@ -57,7 +58,6 @@ export interface ControllableDevice {
   capability_source?: CapabilitySource;
   capabilities: DeviceCapability[];
   risk_level: DeviceRiskLevel;
-  enabled: boolean;
   stateless?: boolean;
 }
 
@@ -174,6 +174,21 @@ export interface AuditQuery {
   to?: string;
   limit?: number;
   offset?: number;
+}
+
+export interface DeviceExposureRoomRule {
+  room: string;
+  enabled: boolean;
+}
+
+export interface DeviceExposureConfig {
+  rooms: DeviceExposureRoomRule[];
+  devices: string[];
+}
+
+export interface DeviceExposureUpdatePayload {
+  rooms: DeviceExposureRoomRule[];
+  devices: string[];
 }
 
 export interface AuditSummary {

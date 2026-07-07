@@ -1,14 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import type { LightDevice } from './models/types.js';
+import type { DeviceExposureConfig, LightDevice } from './models/types.js';
 
 export interface AppConfig {
   homeAssistantBaseUrl: string;
   homeAssistantToken: string;
   timeoutMs: number;
   lights: LightDevice[];
+  exposure: DeviceExposureConfig;
 }
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -42,7 +43,7 @@ const loadEnv = () => {
   }
 };
 
-const resolveLightsConfigPath = () => {
+export const resolveLightsConfigPath = () => {
   if (process.env.LIGHTS_CONFIG_PATH) {
     return resolve(resolveWorkspaceRoot(), process.env.LIGHTS_CONFIG_PATH);
   }
@@ -65,9 +66,14 @@ const resolveLightsConfigPath = () => {
 export const loadConfig = (): AppConfig => {
   loadEnv();
 
+  const workspaceRoot = resolveWorkspaceRoot();
   const configPath = resolveLightsConfigPath();
   const raw = readFileSync(configPath, 'utf8');
   const parsed = JSON.parse(raw) as { lights: LightDevice[] };
+  const exposurePath = resolve(workspaceRoot, 'config', 'device-exposure.json');
+  const exposure = existsSync(exposurePath)
+    ? JSON.parse(readFileSync(exposurePath, 'utf8')) as DeviceExposureConfig
+    : { rooms: [], devices: [] };
   const token = process.env.HOME_ASSISTANT_TOKEN ?? process.env.HA_TOKEN ?? '';
 
   if (!token) {
@@ -79,5 +85,14 @@ export const loadConfig = (): AppConfig => {
     homeAssistantToken: token,
     timeoutMs: Number(process.env.HOME_ASSISTANT_TIMEOUT_MS ?? 15000),
     lights: parsed.lights,
+    exposure,
   };
+};
+
+export const saveDeviceExposure = (payload: DeviceExposureConfig) => {
+  const workspaceRoot = resolveWorkspaceRoot();
+  const configDir = resolve(workspaceRoot, 'config');
+  const exposurePath = resolve(configDir, 'device-exposure.json');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(exposurePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 };
