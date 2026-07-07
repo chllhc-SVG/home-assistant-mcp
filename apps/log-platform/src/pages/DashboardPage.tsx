@@ -65,6 +65,7 @@ export const DashboardPage = () => {
   const [whitelistKeyword, setWhitelistKeyword] = React.useState('');
   const [exposureLoading, setExposureLoading] = React.useState(false);
   const [exposedDevices, setExposedDevices] = React.useState<string[]>([]);
+  const [deviceEntitySelection, setDeviceEntitySelection] = React.useState<Record<string, string | undefined>>({});
   const [messageApi, contextHolder] = message.useMessage();
   const deviceSectionRef = React.useRef<HTMLDivElement>(null);
   const logsSectionRef = React.useRef<HTMLDivElement>(null);
@@ -99,6 +100,7 @@ export const DashboardPage = () => {
     void api.getDeviceExposure()
       .then((result) => setExposedDevices(result.exposure))
       .catch(() => undefined);
+    void discoverEntities();
   }, [loadData]);
 
   React.useEffect(() => {
@@ -217,24 +219,41 @@ export const DashboardPage = () => {
   const logKeywordCount = [filterValues.keyword, filterValues.tool_name, filterValues.device_name, filterValues.status].filter(Boolean).length;
 
   const scrollTo = (ref: React.RefObject<HTMLDivElement>) => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const whitelistDevices = discoveredEntities.length > 0
-    ? discoveredEntities.map((entity) => {
-        const matched = devices.find((device) => device.entity_id === entity.entity_id);
-        return {
+  const combinedDevices = React.useMemo(() => {
+    const discoveredByEntityId = new Map(discoveredEntities.map((entity) => [entity.entity_id, entity]));
+    const merged = devices.map((device) => {
+      const discovered = discoveredByEntityId.get(device.entity_id);
+      return {
+        ...device,
+        exposed: exposedDevices.includes(device.entity_id),
+        device_name: discovered?.device_name ?? device.device_name,
+        area_name: discovered?.area_name ?? device.area_name,
+        area_id: discovered?.area_id ?? device.area_id,
+      } as DeviceRecord;
+    });
+
+    for (const entity of discoveredEntities) {
+      if (!merged.some((device) => device.entity_id === entity.entity_id)) {
+        merged.push({
+          device_id: entity.device_id ?? entity.entity_id,
+          display_name: entity.device_name ?? entity.friendly_name,
           entity_id: entity.entity_id,
-          display_name: entity.friendly_name,
-          friendly_name: entity.friendly_name,
+          room: entity.area_name ?? entity.domain ?? 'unknown',
           domain: entity.domain as DeviceRecord['domain'],
-          room: entity.area_name ?? matched?.room ?? entity.domain,
-          enabled: matched?.enabled ?? true,
+          type: entity.domain as DeviceRecord['type'],
+          enabled: true,
           exposed: exposedDevices.includes(entity.entity_id),
-          device_id: entity.device_id,
+          friendly_name: entity.friendly_name,
           device_name: entity.device_name,
           area_id: entity.area_id,
           area_name: entity.area_name,
-        } as DeviceRecord;
-      })
-    : devices.map((device) => ({ ...device, exposed: exposedDevices.includes(device.entity_id) }));
+        });
+      }
+    }
+
+    return merged;
+  }, [devices, discoveredEntities, exposedDevices]);
+  const whitelistDevices = combinedDevices.filter((device) => Boolean(device.device_name));
   const filteredWhitelistDevices = whitelistDevices.filter((device) => {
     if (whitelistDomainFilter !== 'all' && device.domain !== whitelistDomainFilter) return false;
     if (whitelistAreaFilter !== 'all' && (device.area_name ?? 'unassigned') !== whitelistAreaFilter) return false;
@@ -268,15 +287,17 @@ export const DashboardPage = () => {
   const saveExposure = async () => {
     setExposureLoading(true);
     try {
+      const selectedEntityIds = Object.values(deviceEntitySelection).filter((value): value is string => Boolean(value));
       const payload: DeviceExposureConfig = {
-        rooms: Array.from(new Set(whitelistDevices.filter((device) => exposedDevices.includes(device.entity_id) && device.room).map((device) => device.room as string))).map((room) => ({ room, enabled: true })),
-        devices: exposedDevices,
+        rooms: [],
+        devices: selectedEntityIds,
       };
       await api.saveDeviceExposure(payload);
-      messageApi.success(`白名单已保存，当前暴露 ${exposedDevices.length} 个设备`);
+      setExposedDevices(selectedEntityIds);
+      messageApi.success(`白名单已保存，当前选择 ${selectedEntityIds.length} 个实体`);
       await loadData();
       await discoverEntities();
-      setSelectedDevice((current) => current ? whitelistDevices.find((device) => device.entity_id === current.entity_id) ?? current : current);
+      setSelectedDevice((current) => current ? combinedDevices.find((device) => device.entity_id === current.entity_id) ?? current : current);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '保存失败');
     } finally {
@@ -286,11 +307,26 @@ export const DashboardPage = () => {
 
   const toggleExposure = (entityId: string, checked: boolean) => {
     setExposedDevices((current) => checked ? Array.from(new Set([...current, entityId])) : current.filter((id) => id !== entityId));
+    setDeviceEntitySelection((current) => ({
+      ...current,
+      [entityId]: checked ? entityId : undefined,
+    }));
   };
 
-  const toggleRoomExposure = (room: string, checked: boolean) => {
-    const roomDevices = devices.filter((device) => device.room === room).map((device) => device.entity_id);
-    setExposedDevices((current) => checked ? Array.from(new Set([...current, ...roomDevices])) : current.filter((id) => !roomDevices.includes(id)));
+  const toggleDeviceExposure = (deviceName: string, checked: boolean) => {
+    const deviceEntities = combinedDevices.filter((device) => device.device_name === deviceName).map((device) => device.entity_id);
+    setExposedDevices((current) => checked ? Array.from(new Set([...current, ...deviceEntities])) : current.filter((id) => !deviceEntities.includes(id)));
+    setDeviceEntitySelection((current) => {
+      const next = { ...current };
+      for (const entityId of deviceEntities) {
+        if (checked) {
+          next[entityId] = entityId;
+        } else {
+          delete next[entityId];
+        }
+      }
+      return next;
+    });
   };
 
   const renderControlPanel = () => {
@@ -399,33 +435,27 @@ export const DashboardPage = () => {
             </Row>
           </section>
 
-          <Card title={<Space><CompassOutlined />Home Assistant 设备自动发现</Space>} bordered={false} className="section-card" extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverEntities()}>发现设备</Button>}>
-            <Alert type="info" showIcon style={{ marginBottom: 16 }} message="这里展示 Home Assistant 中实际存在的实体总数；下面的‘白名单选择’显示实体与其所属设备、区域信息。" />
+          <Card title={<Space><CompassOutlined />Home Assistant 设备自动发现与白名单</Space>} bordered={false} className="section-card" extra={<Button icon={<ReloadOutlined />} loading={discoverLoading} onClick={() => void discoverEntities()}>发现设备</Button>}>
+            <Alert type="info" showIcon style={{ marginBottom: 16 }} message="页面加载时会自动发现一次 Home Assistant 设备。下面的表格同时支持发现浏览和白名单勾选。" />
             <Space wrap style={{ marginBottom: 12 }}>
               <Tag color="blue">发现实体 {discoveredEntities.length}</Tag>
-              <Tag color="green">白名单设备 {devices.filter((device) => exposedDevices.includes(device.entity_id)).length}</Tag>
-              <Tag color="gold">未暴露设备 {Math.max(devices.length - exposedDevices.length, 0)}</Tag>
+              <Tag color="green">白名单设备 {combinedDevices.filter((device) => exposedDevices.includes(device.entity_id)).length}</Tag>
+              <Tag color="gold">未暴露设备 {Math.max(combinedDevices.length - exposedDevices.length, 0)}</Tag>
             </Space>
-            <Table rowKey="entity_id" dataSource={discoveredEntities} pagination={{ pageSize: 6 }} columns={[{ title: '实体 ID', dataIndex: 'entity_id' }, { title: '实体名', dataIndex: 'friendly_name' }, { title: '设备名', dataIndex: 'device_name', render: (value?: string) => value ?? <Tag color="default">未关联设备</Tag> }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '状态', dataIndex: 'state', render: (value: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value}</Tag> }, { title: '亮度能力', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '未知/不支持'}</Tag> }, { title: '温度能力', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }]} />
-          </Card>
-
-          <Card title={<Space><ApiOutlined />白名单选择</Space>} bordered={false} className="section-card" extra={<Button type="primary" onClick={() => void saveExposure()} loading={exposureLoading}>保存白名单</Button>}>
-            <Space direction="vertical" style={{ width: '100%' }} size={12}>
-              <Alert type="success" showIcon message={`当前已选择 ${exposedDevices.length} 个设备，涉及 ${selectedRooms.length} 个房间。`} />
-              <Space wrap>
-                <Input allowClear placeholder="按名称 / 设备名 / entity_id 筛选" value={whitelistKeyword} onChange={(e) => setWhitelistKeyword(e.target.value)} style={{ width: 260 }} />
-                <Select style={{ width: 180 }} value={whitelistDomainFilter} options={deviceTypeOptions} onChange={setWhitelistDomainFilter} />
-                <Select style={{ width: 220 }} value={whitelistAreaFilter} options={[{ value: 'all', label: '全部区域' }, ...allAreas.map((area) => ({ value: area, label: area }))]} onChange={setWhitelistAreaFilter} />
-                <Button onClick={() => { setWhitelistKeyword(''); setWhitelistDomainFilter('all'); setWhitelistAreaFilter('all'); }}>清除筛选</Button>
-              </Space>
-              <Space wrap>
-                <Button onClick={() => setExposedDevices(filteredWhitelistDevices.map((device) => device.entity_id))}>全选当前筛选</Button>
-                <Button onClick={() => setExposedDevices((current) => current.filter((id) => !filteredWhitelistDevices.some((device) => device.entity_id === id))) }>取消当前筛选</Button>
-                <Button onClick={() => setExposedDevices(whitelistDevices.map((device) => device.entity_id))}>全选</Button>
-                <Button onClick={() => setExposedDevices([])}>全不选</Button>
-              </Space>
-              <Table rowKey="entity_id" dataSource={filteredWhitelistDevices} pagination={{ pageSize: 8 }} rowClassName={(record) => exposedDevices.includes(record.entity_id) ? 'exposure-row-exposed' : 'exposure-row-hidden'} columns={[{ title: '暴露', dataIndex: 'entity_id', render: (_: unknown, record: DeviceRecord) => <Checkbox checked={exposedDevices.includes(record.entity_id)} onChange={(e) => toggleExposure(record.entity_id, e.target.checked)} /> }, { title: '名称', dataIndex: 'friendly_name', render: (_: unknown, record: DeviceRecord) => record.friendly_name ?? record.display_name }, { title: '设备名', dataIndex: 'device_name', render: (value?: string) => value ?? <Tag color="default">未关联设备</Tag> }, { title: '区域', dataIndex: 'area_name', render: (value?: string) => value ?? <Tag color="orange">未分配区域</Tag> }, { title: 'entity_id', dataIndex: 'entity_id' }, { title: '房间', dataIndex: 'room', render: (value?: string) => value ?? <Tag color="orange">未发现房间</Tag> }, { title: '类型', dataIndex: 'domain', render: (value?: string) => <Tag>{value ?? '-'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Input allowClear placeholder="按名称 / 设备名筛选" value={whitelistKeyword} onChange={(e) => setWhitelistKeyword(e.target.value)} style={{ width: 260 }} />
+              <Select style={{ width: 180 }} value={whitelistDomainFilter} options={deviceTypeOptions} onChange={setWhitelistDomainFilter} />
+              <Select style={{ width: 220 }} value={whitelistAreaFilter} options={[{ value: 'all', label: '全部区域' }, ...allAreas.map((area) => ({ value: area, label: area }))]} onChange={setWhitelistAreaFilter} />
+              <Button onClick={() => { setWhitelistKeyword(''); setWhitelistDomainFilter('all'); setWhitelistAreaFilter('all'); }}>清除筛选</Button>
+              <Button type="primary" onClick={() => void saveExposure()} loading={exposureLoading}>保存白名单</Button>
             </Space>
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Button onClick={() => setExposedDevices(filteredWhitelistDevices.map((device) => device.entity_id))}>全选当前筛选</Button>
+              <Button onClick={() => setExposedDevices((current) => current.filter((id) => !filteredWhitelistDevices.some((device) => device.entity_id === id))) }>取消当前筛选</Button>
+              <Button onClick={() => setExposedDevices(whitelistDevices.map((device) => device.entity_id))}>全选</Button>
+              <Button onClick={() => setExposedDevices([])}>全不选</Button>
+            </Space>
+            <Table rowKey="device_name" dataSource={Array.from(new Map(filteredWhitelistDevices.filter((device) => device.device_name).map((device) => [device.device_name as string, device])).entries()).map(([, device]) => device)} pagination={{ pageSize: 8 }} rowClassName={(record) => exposedDevices.some((id) => combinedDevices.find((device) => device.entity_id === id)?.device_name === record.device_name) ? 'exposure-row-exposed' : 'exposure-row-hidden'} columns={[{ title: '暴露', dataIndex: 'device_name', render: (_: unknown, record: DeviceRecord) => { const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name).map((device) => device.entity_id); const allChecked = deviceEntities.length > 0 && deviceEntities.every((entityId) => exposedDevices.includes(entityId)); return <Checkbox checked={allChecked} onChange={(e) => toggleDeviceExposure(record.device_name ?? '', e.target.checked)} />; } }, { title: '设备名', dataIndex: 'device_name', render: (value?: string) => value ?? <Tag color="default">未关联设备</Tag> }, { title: '实体', dataIndex: 'friendly_name', render: (_: unknown, record: DeviceRecord) => { const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name); return <Select style={{ width: '100%' }} value={deviceEntitySelection[deviceEntities[0]?.entity_id ?? '']} placeholder="选择实体" options={deviceEntities.map((entity) => ({ value: entity.entity_id, label: entity.friendly_name ?? entity.display_name }))} onChange={(entityId) => { setDeviceEntitySelection((current) => ({ ...current, [entityId]: entityId })); setExposedDevices((current) => Array.from(new Set([...current, entityId]))); }} />; } }, { title: '区域', dataIndex: 'area_name', render: (value?: string) => value ?? <Tag color="orange">未分配区域</Tag> }, { title: '房间', dataIndex: 'room', render: (value?: string) => value ?? <Tag color="orange">未发现房间</Tag> }, { title: '类型', dataIndex: 'domain', render: (value?: string) => <Tag>{value ?? '-'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
           </Card>
 
           <section ref={mappingSectionRef}>
