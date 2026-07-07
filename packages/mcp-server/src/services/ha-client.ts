@@ -1,4 +1,14 @@
+import WebSocket, { type RawData } from 'ws';
+import type { HaAreaInfo, HaDeviceInfo, HaEntityRegistryEntry } from '../models/types.js';
 import { extractEntityCapabilitySnapshot } from './device-capabilities.js';
+
+type WsResultMessage<T> = {
+  id: number;
+  type: 'result';
+  success: boolean;
+  result?: T;
+  error?: { code: string; message: string };
+};
 
 export class HomeAssistantError extends Error {
   constructor(
@@ -17,6 +27,15 @@ export class HaClient {
     private readonly token: string,
     private readonly timeoutMs = 15000,
   ) {}
+
+  private getWebSocketUrl() {
+    const url = new URL(this.baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/api/websocket';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  }
 
   private async request<T>(path: string, init: RequestInit): Promise<T> {
     if (!this.token) {
@@ -69,32 +88,228 @@ export class HaClient {
     return this.request<Array<Record<string, unknown>>>('/api/states', { method: 'GET' });
   }
 
+  listEntityRegistry() {
+    return this.request<HaEntityRegistryEntry[]>('/api/entity_registry/list', { method: 'GET' });
+  }
+
+  listDeviceRegistry() {
+    return this.request<HaDeviceInfo[]>('/api/device_registry/list', { method: 'GET' });
+  }
+
+  listAreas() {
+    return this.request<HaAreaInfo[]>('/api/areas', { method: 'GET' });
+  }
+
+  private async wsRequest<T>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
+    if (!this.token) {
+      throw new HomeAssistantError('AUTH_FAILED', 'Home Assistant token is empty. 请设置 HOME_ASSISTANT_TOKEN 或 HA_TOKEN。');
+    }
+
+    const ws = new WebSocket(this.getWebSocketUrl());
+    const timeoutMs = this.timeoutMs;
+    const command = { id: 1, type, ...payload };
+    const readMessageText = async (data: RawData) => {
+      if (typeof data === 'string') return data;
+      if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
+      if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
+      if (Array.isArray(data)) return new TextDecoder().decode(Buffer.concat(data));
+      return String(data);
+    };
+
+    console.log('[ha-ws] connect', { command, url: this.getWebSocketUrl() });
+
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const settle = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        callback();
+      };
+      const timeout = setTimeout(() => {
+        console.log('[ha-ws] timeout', { command, timeoutMs });
+        ws.close();
+        settle(() => reject(new HomeAssistantError('TIMEOUT', `Home Assistant websocket request timed out after ${timeoutMs}ms`)));
+      }, timeoutMs);
+
+      ws.addEventListener('error', () => {
+        console.log('[ha-ws] error', { command });
+        settle(() => reject(new HomeAssistantError('SERVICE_FAILED', 'Home Assistant websocket connection failed')));
+      });
+
+      ws.addEventListener('message', async (event: { data: RawData }) => {
+        try {
+          const text = await readMessageText(event.data);
+          console.log('[ha-ws] raw full', { command, text });
+          const msg = JSON.parse(text) as Record<string, unknown>;
+          if (msg.type === 'auth_required') {
+            ws.send(JSON.stringify({ type: 'auth', access_token: this.token }));
+            return;
+          }
+          if (msg.type === 'auth_invalid') {
+            ws.close();
+            console.log('[ha-ws] auth_invalid', { command, msg });
+            settle(() => reject(new HomeAssistantError('AUTH_FAILED', typeof msg.message === 'string' ? msg.message : 'Home Assistant websocket auth failed')));
+            return;
+          }
+          if (msg.type === 'auth_ok') {
+            console.log('[ha-ws] auth_ok', { command });
+            ws.send(JSON.stringify(command));
+            return;
+          }
+          if (msg.type === 'result') {
+            ws.close();
+            const result = msg as WsResultMessage<T>;
+            console.log('[ha-ws] result raw', { command, message: msg });
+          console.log('[ha-ws] result full', { command, success: result.success, result: result.result, error: result.error });
+            if (!result.success) {
+              settle(() => reject(new HomeAssistantError('SERVICE_FAILED', result.error?.message ?? 'Home Assistant websocket request failed')));
+              return;
+            }
+            settle(() => resolve(result.result as T));
+          }
+        } catch (error) {
+          ws.close();
+          console.log('[ha-ws] parse failed', { command, error });
+          settle(() => reject(new HomeAssistantError('SERVICE_FAILED', error instanceof Error ? error.message : String(error))));
+        }
+      });
+    });
+  }
+
   async discoverEntities(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
-    const states = await this.listStates();
+    const toStringValue = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : undefined;
+    const normalizeEntityEntry = (entity: Record<string, unknown>): HaEntityRegistryEntry => ({
+      entity_id: toStringValue(entity.ei) ?? toStringValue(entity.entity_id) ?? '',
+      device_id: toStringValue(entity.di) ?? toStringValue(entity.device_id),
+      area_id: toStringValue(entity.ai) ?? toStringValue(entity.area_id),
+      platform: toStringValue(entity.pl) ?? toStringValue(entity.platform),
+      unique_id: toStringValue(entity.unique_id) ?? toStringValue(entity.tk),
+      name: toStringValue(entity.en) ?? toStringValue(entity.name) ?? toStringValue(entity.original_name),
+    });
+    const normalizeDeviceEntry = (device: Record<string, unknown>): HaDeviceInfo => ({
+      id: toStringValue(device.id),
+      name: toStringValue(device.name),
+      name_by_user: toStringValue(device.name_by_user),
+      manufacturer: toStringValue(device.manufacturer),
+      model: toStringValue(device.model),
+      area_id: toStringValue(device.area_id),
+    });
+    const normalizeAreaEntry = (area: Record<string, unknown>): HaAreaInfo => ({
+      area_id: toStringValue(area.area_id) ?? toStringValue(area.id) ?? '',
+      name: toStringValue(area.name) ?? '',
+    });
+
+    const [states, displayEntityRegistry, fullEntityRegistry, deviceRegistry, areas] = await Promise.all([
+      this.listStates(),
+      this.wsRequest<{ entities: Array<Record<string, unknown>>; entity_categories?: Record<string, string> }>('config/entity_registry/list_for_display')
+        .then((payload) => payload.entities.map(normalizeEntityEntry).filter((entry) => entry.entity_id))
+        .catch((error) => {
+          console.error('[ha-ws] config/entity_registry/list_for_display failed', error);
+          return [];
+        }),
+      this.wsRequest<Array<Record<string, unknown>>>('config/entity_registry/list')
+        .then((payload) => payload.map(normalizeEntityEntry).filter((entry) => entry.entity_id))
+        .catch((error) => {
+          console.error('[ha-ws] config/entity_registry/list failed', error);
+          return [];
+        }),
+      this.wsRequest<Array<Record<string, unknown>>>('config/device_registry/list')
+        .then((payload) => payload.map(normalizeDeviceEntry))
+        .catch((error) => {
+          console.error('[ha-ws] config/device_registry/list failed', error);
+          return [];
+        }),
+      this.wsRequest<Array<Record<string, unknown>>>('config/area_registry/list')
+        .then((payload) => payload.map(normalizeAreaEntry).filter((area) => area.area_id))
+        .catch((error) => {
+          console.error('[ha-ws] config/area_registry/list failed', error);
+          return [];
+        }),
+    ]);
+    const entityRegistry = [...displayEntityRegistry, ...fullEntityRegistry].reduce<HaEntityRegistryEntry[]>((entries, entry) => {
+      const existingIndex = entries.findIndex((item) => item.entity_id === entry.entity_id);
+      if (existingIndex === -1) return [...entries, entry];
+      entries[existingIndex] = { ...entries[existingIndex], ...entry };
+      return entries;
+    }, []);
+    console.log('[ha-registry] counts', {
+      states: states.length,
+      displayEntityRegistry: displayEntityRegistry.length,
+      fullEntityRegistry: fullEntityRegistry.length,
+      mergedEntityRegistry: entityRegistry.length,
+      entitiesWithDevice: entityRegistry.filter((entry) => entry.device_id).length,
+      entitiesWithArea: entityRegistry.filter((entry) => entry.area_id).length,
+      deviceRegistry: deviceRegistry.length,
+      areas: areas.length,
+    });
+    console.log('[ha-registry] sample entities', entityRegistry.slice(0, 10));
+    console.log('[ha-registry] sample devices', deviceRegistry.slice(0, 10));
+    console.log('[ha-registry] sample areas', areas.slice(0, 10));
+
+    const entityIds = states
+      .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
+      .map((item) => item.entity_id as string);
+    const extractedTargets = await Promise.all(entityIds.map(async (entityId) => {
+      try {
+        const result = await this.wsRequest<{
+          referenced_entities?: string[];
+          referenced_devices?: string[];
+          referenced_areas?: string[];
+        }>('extract_from_target', { target: { entity_id: [entityId] }, expand_group: true });
+        return [entityId, result] as const;
+      } catch (error) {
+        console.warn('[ha-ws] extract_from_target failed', { entityId, error });
+        return [entityId, undefined] as const;
+      }
+    }));
+    const extractedTargetByEntityId = new Map(extractedTargets);
+
+    const areaById = new Map(areas.map((area) => [area.area_id, area]));
+    const deviceRegistryById = new Map(deviceRegistry.filter((device): device is HaDeviceInfo & { id: string } => typeof device.id === 'string').map((device) => [device.id, device]));
+    const entityRegistryByEntityId = new Map(entityRegistry.filter((entry): entry is HaEntityRegistryEntry & { entity_id: string } => typeof entry.entity_id === 'string').map((entry) => [entry.entity_id, entry]));
+
     return states
       .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
       .map((item) => {
         const snapshot = extractEntityCapabilitySnapshot(item);
-        if (!snapshot) {
-          return {
-            entity_id: item.entity_id as string,
-            domain: (item.entity_id as string).split('.')[0],
-            state: 'unknown',
-            friendly_name: item.entity_id as string,
-            supports_brightness: false,
-            supports_value: false,
-            supports_temperature: false,
-            supports_hvac_mode: false,
-            supports_fan_mode: false,
-            supports_swing_mode: false,
-            supported_color_modes: [],
-            hvac_modes: [],
-            fan_modes: [],
-            swing_modes: [],
-            raw: item,
-          };
-        }
-        return snapshot;
+        const entityId = item.entity_id as string;
+        const registryEntry = entityRegistryByEntityId.get(entityId);
+        const extractedTarget = extractedTargetByEntityId.get(entityId);
+        const extractedDeviceId = extractedTarget?.referenced_devices?.[0];
+        const extractedAreaId = extractedTarget?.referenced_areas?.[0];
+        const deviceId = registryEntry?.device_id ?? extractedDeviceId;
+        const areaId = registryEntry?.area_id ?? extractedAreaId;
+        const device = deviceId ? deviceRegistryById.get(deviceId) : undefined;
+        const base = snapshot ?? {
+          entity_id: entityId,
+          domain: entityId.split('.')[0],
+          state: 'unknown',
+          friendly_name: entityId,
+          supports_brightness: false,
+          supports_value: false,
+          supports_temperature: false,
+          supports_hvac_mode: false,
+          supports_fan_mode: false,
+          supports_swing_mode: false,
+          supported_color_modes: [],
+          hvac_modes: [],
+          fan_modes: [],
+          swing_modes: [],
+          raw: item,
+        };
+
+        return {
+          ...base,
+          device_id: deviceId ?? undefined,
+          device_name: device?.name_by_user ?? device?.name ?? device?.model ?? registryEntry?.device_info?.name ?? undefined,
+          device_manufacturer: device?.manufacturer,
+          device_model: device?.model,
+          area_id: areaId ?? device?.area_id ?? undefined,
+          area_name: (areaId ? areaById.get(areaId)?.name : undefined) ?? (device?.area_id ? areaById.get(device.area_id)?.name : undefined),
+          unique_id: registryEntry?.unique_id,
+          platform: registryEntry?.platform,
+        };
       });
   }
 

@@ -63,6 +63,38 @@ export interface ControllableDevice {
 
 export type LightDevice = ControllableDevice;
 
+export interface HaDeviceInfo {
+  id?: string;
+  name?: string;
+  name_by_user?: string;
+  manufacturer?: string;
+  model?: string;
+  area_id?: string | null;
+  configuration_url?: string;
+  connections?: Array<[string, string]>;
+  identifiers?: Array<[string, string]>;
+  hw_version?: string;
+  sw_version?: string;
+  via_device_id?: string | null;
+}
+
+export interface HaAreaInfo {
+  area_id: string;
+  name: string;
+}
+
+export interface HaEntityRegistryEntry {
+  entity_id: string;
+  device_id?: string | null;
+  area_id?: string | null;
+  unique_id?: string;
+  platform?: string;
+  original_name?: string | null;
+  name?: string | null;
+  disabled_by?: string | null;
+  device_info?: HaDeviceInfo;
+}
+
 export interface HaEntityCapabilitySnapshot {
   entity_id: string;
   domain: string;

@@ -40,6 +40,9 @@ export interface DeviceRecord {
   entity_id: string;
   domain?: 'light' | 'switch' | 'button' | 'number' | 'climate' | 'sensor';
   room?: string;
+  area_id?: string;
+  area_name?: string;
+  device_name?: string;
   type?: 'light' | 'switch' | 'button' | 'number' | 'climate' | 'sensor';
   state?: string;
   friendly_name?: string;
@@ -84,6 +87,14 @@ export interface DiscoveredEntity {
   domain?: string;
   friendly_name: string;
   state: string;
+  device_id?: string;
+  device_name?: string;
+  device_manufacturer?: string;
+  device_model?: string;
+  area_id?: string;
+  area_name?: string;
+  unique_id?: string;
+  platform?: string;
   supports_brightness: boolean;
   supports_value?: boolean;
   supports_temperature?: boolean;
@@ -151,6 +162,7 @@ const formatApiError = (payload: unknown, fallback: string) => {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  console.log('[api] request', { path, init });
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
@@ -159,6 +171,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const payload = await response.json().catch(() => null);
+  console.log('[api] response', { path, ok: response.ok, status: response.status, payload });
+  console.log('[api] response json full', path, JSON.stringify(payload));
   if (!response.ok) {
     throw new Error(formatApiError(payload, `Request failed: ${response.status}`));
   }
