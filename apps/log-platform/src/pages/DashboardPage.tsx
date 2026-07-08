@@ -65,12 +65,13 @@ export const DashboardPage = () => {
   const [whitelistKeyword, setWhitelistKeyword] = React.useState('');
   const [exposureLoading, setExposureLoading] = React.useState(false);
   const [exposedDevices, setExposedDevices] = React.useState<string[]>([]);
+  const [expandedDeviceNames, setExpandedDeviceNames] = React.useState<string[]>([]);
   const [deviceEntitySelection, setDeviceEntitySelection] = React.useState<Record<string, string | undefined>>({});
   const [messageApi, contextHolder] = message.useMessage();
   const deviceSectionRef = React.useRef<HTMLDivElement>(null);
   const logsSectionRef = React.useRef<HTMLDivElement>(null);
   const statusSectionRef = React.useRef<HTMLDivElement>(null);
-  const mappingSectionRef = React.useRef<HTMLDivElement>(null);
+  
 
   const loadData = React.useCallback(async (query?: URLSearchParams) => {
     setLoading(true);
@@ -329,6 +330,10 @@ export const DashboardPage = () => {
     });
   };
 
+  const toggleDeviceExpanded = (deviceName: string) => {
+    setExpandedDeviceNames((current) => current.includes(deviceName) ? current.filter((name) => name !== deviceName) : [...current, deviceName]);
+  };
+
   const renderControlPanel = () => {
     if (!selectedDevice) return <Empty description="请选择一个设备开始控制" />;
     const domain = selectedDevice.domain;
@@ -365,7 +370,7 @@ export const DashboardPage = () => {
           { key: 'devices', icon: <BulbOutlined />, label: '具体设备控制', onClick: () => scrollTo(deviceSectionRef) },
           { key: 'logs', icon: <FilterOutlined />, label: '日志查询', onClick: () => scrollTo(logsSectionRef) },
           { key: 'status', icon: <ThunderboltOutlined />, label: '系统状态', onClick: () => scrollTo(statusSectionRef) },
-          { key: 'mapping', icon: <ApiOutlined />, label: 'Home Assistant 控制映射表', onClick: () => scrollTo(mappingSectionRef) },
+
         ]} />
       </aside>
 
@@ -394,7 +399,7 @@ export const DashboardPage = () => {
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
                 <Select style={{ width: '100%' }} value={deviceDomainFilter} options={deviceTypeOptions} onChange={setDeviceDomainFilter} placeholder="筛选设备类型" />
                 <Select style={{ width: '100%' }} value={selectedDevice?.entity_id} placeholder="选择设备" options={filteredDevices.map((device) => ({ label: formatDeviceLabel(device), value: device.entity_id }))} onChange={(entityId) => { const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null; setSelectedDevice(nextDevice); if (typeof nextDevice?.brightness === 'number') setBrightness(nextDevice.brightness); if (typeof nextDevice?.target_temperature === 'number') setTargetTemperature(nextDevice.target_temperature); }} />
-                <Table size="small" rowKey="entity_id" pagination={{ pageSize: 5 }} dataSource={filteredDevices} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: 'entity_id', dataIndex: 'entity_id' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '状态', dataIndex: 'state', render: (value?: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value ?? '-'}</Tag> }, { title: '启用', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} onRow={(record) => ({ onClick: () => { const nextDevice = devices.find((device) => device.entity_id === record.entity_id) ?? null; setSelectedDevice(nextDevice); } })} />
+                <Table size="small" rowKey="entity_id" pagination={{ pageSize: 5 }} dataSource={filteredDevices} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '状态', dataIndex: 'state', render: (value?: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value ?? '-'}</Tag> }, { title: '启用', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} onRow={(record) => ({ onClick: () => { const nextDevice = devices.find((device) => device.entity_id === record.entity_id) ?? null; setSelectedDevice(nextDevice); } })} />
                 {selectedDevice ? <Descriptions bordered size="small" column={1}><Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item><Descriptions.Item label="实体 ID">{selectedDevice.entity_id}</Descriptions.Item><Descriptions.Item label="显示名">{formatDeviceLabel(selectedDevice)}</Descriptions.Item><Descriptions.Item label="类型">{selectedDevice.domain ?? '-'}</Descriptions.Item><Descriptions.Item label="当前状态">{selectedDevice.state ?? '-'}</Descriptions.Item><Descriptions.Item label="房间">{selectedDevice.room ?? '-'}</Descriptions.Item><Descriptions.Item label="亮度能力">{selectedDevice.supports_brightness ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="色温能力">{selectedDevice.domain === 'light' ? <Tag color="green">支持</Tag> : <Tag>不适用</Tag>}</Descriptions.Item><Descriptions.Item label="色温范围">{selectedDevice.domain === 'light' ? `${selectedDevice.color_temp_min_kelvin ?? 3000}K ~ ${selectedDevice.color_temp_max_kelvin ?? 6400}K` : '-'}</Descriptions.Item><Descriptions.Item label="数值能力">{selectedDevice.supports_value ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="温度能力">{selectedDevice.supports_temperature ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="HVAC 模式">{selectedDevice.hvac_modes?.length ? selectedDevice.hvac_modes.join(', ') : '-'}</Descriptions.Item><Descriptions.Item label="传感器值">{selectedDevice.sensor_value === undefined ? '-' : `${selectedDevice.sensor_value}${selectedDevice.sensor_unit ?? ''}`}</Descriptions.Item><Descriptions.Item label="能力来源">{selectedDevice.capability_source === 'home_assistant' ? <Tag color="blue">Home Assistant</Tag> : <Tag>配置</Tag>}</Descriptions.Item></Descriptions> : null}
                 {renderControlPanel()}
               </Space>
@@ -402,7 +407,17 @@ export const DashboardPage = () => {
           </section>
 
           <section ref={logsSectionRef}>
-            <Card title={<Space><FilterOutlined />日志查询</Space>} bordered={false} className="section-card" extra={<Tag color={logKeywordCount > 0 ? 'blue' : 'default'}>{logKeywordCount > 0 ? `已筛选 ${logKeywordCount}` : '未筛选'}</Tag>}>
+            <Card
+              title={<Space><FilterOutlined />日志查询与控制审计</Space>}
+              bordered={false}
+              className="section-card"
+              extra={
+                <Space>
+                  <Tag color={logKeywordCount > 0 ? 'blue' : 'default'}>{logKeywordCount > 0 ? `已筛选 ${logKeywordCount}` : '未筛选'}</Tag>
+                  <Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button>
+                </Space>
+              }
+            >
               <Form form={form} component={false}>
                 <Row gutter={[12, 12]} align="middle">
                   <Col xs={24} md={7}><Form.Item name="keyword" noStyle><Input allowClear placeholder="关键字 / 用户输入" /></Form.Item></Col>
@@ -412,11 +427,8 @@ export const DashboardPage = () => {
                   <Col xs={24} md={3}><Space style={{ width: '100%', display: 'flex' }}><Button type="primary" icon={<SearchOutlined />} onClick={onSearch} loading={loading} style={{ width: '100%' }}>查询</Button><Button onClick={resetFilters} style={{ width: '100%' }}>重置</Button></Space></Col>
                 </Row>
               </Form>
-              <Alert style={{ marginTop: 16 }} type="info" showIcon message="支持按关键字、工具名、设备名和结果状态筛选。点击“重置”可恢复全部日志。" />
-            </Card>
-
-            <Card title="控制与审计日志" bordered={false} className="section-card" style={{ marginTop: 16 }} extra={<Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button>}>
-              <Table columns={logColumns} dataSource={logs} rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: true, pageSizeOptions: ['8', '16', '32'] }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
+              <Alert style={{ marginTop: 16 }} type="info" showIcon message="支持按关键字、工具名、设备名和结果状态筛选，表格同时展示查询日志与控制审计日志。" />
+              <Table style={{ marginTop: 16 }} columns={logColumns} dataSource={logs} rowKey="id" loading={loading} pagination={{ pageSize: 8, showSizeChanger: false }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
             </Card>
           </section>
 
@@ -450,19 +462,24 @@ export const DashboardPage = () => {
               <Button type="primary" onClick={() => void saveExposure()} loading={exposureLoading}>保存白名单</Button>
             </Space>
             <Space wrap style={{ marginBottom: 12 }}>
-              <Button onClick={() => setExposedDevices(filteredWhitelistDevices.map((device) => device.entity_id))}>全选当前筛选</Button>
-              <Button onClick={() => setExposedDevices((current) => current.filter((id) => !filteredWhitelistDevices.some((device) => device.entity_id === id))) }>取消当前筛选</Button>
-              <Button onClick={() => setExposedDevices(whitelistDevices.map((device) => device.entity_id))}>全选</Button>
-              <Button onClick={() => setExposedDevices([])}>全不选</Button>
+              <Button
+                type={filteredWhitelistDevices.length > 0 && filteredWhitelistDevices.every((device) => exposedDevices.includes(device.entity_id)) ? 'primary' : 'default'}
+                onClick={() => {
+                  const allFilteredSelected = filteredWhitelistDevices.length > 0 && filteredWhitelistDevices.every((device) => exposedDevices.includes(device.entity_id));
+                  setExposedDevices((current) => allFilteredSelected
+                    ? current.filter((id) => !filteredWhitelistDevices.some((device) => device.entity_id === id))
+                    : Array.from(new Set([...current, ...filteredWhitelistDevices.map((device) => device.entity_id)])));
+                }}
+              >
+                全选
+              </Button>
             </Space>
-            <Table rowKey="device_name" dataSource={Array.from(new Map(filteredWhitelistDevices.filter((device) => device.device_name).map((device) => [device.device_name as string, device])).entries()).map(([, device]) => device)} pagination={{ pageSize: 8 }} rowClassName={(record) => exposedDevices.some((id) => combinedDevices.find((device) => device.entity_id === id)?.device_name === record.device_name) ? 'exposure-row-exposed' : 'exposure-row-hidden'} columns={[{ title: '暴露', dataIndex: 'device_name', render: (_: unknown, record: DeviceRecord) => { const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name).map((device) => device.entity_id); const allChecked = deviceEntities.length > 0 && deviceEntities.every((entityId) => exposedDevices.includes(entityId)); return <Checkbox checked={allChecked} onChange={(e) => toggleDeviceExposure(record.device_name ?? '', e.target.checked)} />; } }, { title: '设备名', dataIndex: 'device_name', render: (value?: string) => value ?? <Tag color="default">未关联设备</Tag> }, { title: '实体', dataIndex: 'friendly_name', render: (_: unknown, record: DeviceRecord) => { const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name); return <Select style={{ width: '100%' }} value={deviceEntitySelection[deviceEntities[0]?.entity_id ?? '']} placeholder="选择实体" options={deviceEntities.map((entity) => ({ value: entity.entity_id, label: entity.friendly_name ?? entity.display_name }))} onChange={(entityId) => { setDeviceEntitySelection((current) => ({ ...current, [entityId]: entityId })); setExposedDevices((current) => Array.from(new Set([...current, entityId]))); }} />; } }, { title: '区域', dataIndex: 'area_name', render: (value?: string) => value ?? <Tag color="orange">未分配区域</Tag> }, { title: '房间', dataIndex: 'room', render: (value?: string) => value ?? <Tag color="orange">未发现房间</Tag> }, { title: '类型', dataIndex: 'domain', render: (value?: string) => <Tag>{value ?? '-'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
+            <Table rowKey="device_name" dataSource={Array.from(new Map(filteredWhitelistDevices.filter((device) => device.device_name).map((device) => [device.device_name as string, device])).entries()).map(([, device]) => device)} pagination={{ pageSize: 8, showSizeChanger: false }} expandable={{ expandedRowRender: (record) => {
+              const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name);
+              return <Space direction="vertical" style={{ width: '100%' }} size={10}>{deviceEntities.map((entity) => { const checked = exposedDevices.includes(entity.entity_id); return <Space key={entity.entity_id} style={{ width: '100%', justifyContent: 'space-between' }}><Space><Checkbox checked={checked} onChange={(e) => toggleExposure(entity.entity_id, e.target.checked)} /> <Typography.Text>{entity.friendly_name ?? entity.display_name}</Typography.Text></Space><Tag>{entity.domain ?? '-'}</Tag></Space>; })}</Space>;
+            }, expandedRowKeys: expandedDeviceNames, onExpandedRowsChange: (keys) => setExpandedDeviceNames(keys as string[]), rowExpandable: (record) => Boolean(record.device_name), expandRowByClick: true, showExpandColumn: false }} columns={[{ title: '暴露', dataIndex: 'device_name', render: (_: unknown, record: DeviceRecord) => { const deviceEntities = combinedDevices.filter((device) => device.device_name === record.device_name).map((device) => device.entity_id); const allChecked = deviceEntities.length > 0 && deviceEntities.every((entityId) => exposedDevices.includes(entityId)); return <Checkbox checked={allChecked} onChange={(e) => toggleDeviceExposure(record.device_name ?? '', e.target.checked)} />; } }, { title: '设备名', dataIndex: 'device_name', render: (value?: string) => value ?? <Tag color="default">未关联设备</Tag> }, { title: '实体数', dataIndex: 'device_name', render: (_: unknown, record: DeviceRecord) => combinedDevices.filter((device) => device.device_name === record.device_name).length }, { title: '区域', dataIndex: 'area_name', render: (value?: string) => value ?? <Tag color="orange">未分配区域</Tag> }, { title: '房间', dataIndex: 'room', render: (value?: string) => value ?? <Tag color="orange">未发现房间</Tag> }, { title: '类型', dataIndex: 'domain', render: (value?: string) => <Tag>{value ?? '-'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
           </Card>
 
-          <section ref={mappingSectionRef}>
-            <Card title="Home Assistant 控制映射表" bordered={false} className="section-card">
-              <Table rowKey="device_id" dataSource={devices} pagination={false} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: 'entity_id', dataIndex: 'entity_id' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '房间', dataIndex: 'room' }, { title: '亮度', dataIndex: 'supports_brightness', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }, { title: '温度', dataIndex: 'supports_temperature', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '支持' : '不支持'}</Tag> }, { title: '状态', dataIndex: 'enabled', render: (value: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} />
-            </Card>
-          </section>
         </Space>
 
         <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} width={680} title="日志详情">
