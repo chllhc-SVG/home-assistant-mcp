@@ -182,7 +182,7 @@ export const DashboardPage = () => {
       if (action === 'swing_mode' && swingMode) await api.setClimateSwingMode(selectedDevice.entity_id, swingMode);
       await refreshSelectedDeviceState(selectedDevice);
       messageApi.success('控制指令已执行，日志已刷新');
-      await refreshLogs();
+      void refreshLogs();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '控制失败');
     } finally {
@@ -196,7 +196,7 @@ export const DashboardPage = () => {
     try {
       const state = selectedDevice.domain === 'sensor' ? await api.getSensorState(selectedDevice.entity_id) : selectedDevice.domain === 'climate' ? await api.getClimateState(selectedDevice.entity_id) : selectedDevice.domain === 'switch' ? await api.getSwitchState(selectedDevice.entity_id) : selectedDevice.domain === 'button' ? await api.getButtonState(selectedDevice.entity_id) : selectedDevice.domain === 'number' ? await api.getNumberState(selectedDevice.entity_id) : await api.getLightState(selectedDevice.entity_id);
       messageApi.info(`当前状态：${String(state.state ?? 'unknown')}`);
-      await refreshLogs();
+      void refreshLogs();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '查询失败');
     } finally {
@@ -294,9 +294,10 @@ export const DashboardPage = () => {
       };
       await api.saveDeviceExposure(payload);
       setExposedDevices(selectedEntityIds);
+      setDevices((current) => current.filter((device) => selectedEntityIds.includes(device.entity_id)));
       messageApi.success(`白名单已保存，当前选择 ${selectedEntityIds.length} 个实体`);
-      await loadData();
-      await discoverEntities();
+      void loadData();
+      void discoverEntities();
       setSelectedDevice((current) => current ? combinedDevices.find((device) => device.entity_id === current.entity_id) ?? current : current);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '保存失败');

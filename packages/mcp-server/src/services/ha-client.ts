@@ -22,6 +22,9 @@ export class HomeAssistantError extends Error {
 }
 
 export class HaClient {
+  private entityDiscoveryCache = new Map<string, { expiresAt: number; value: ReturnType<HaClient['discoverEntitiesWithoutCache']> extends Promise<infer T> ? T : never }>();
+  private entityDiscoveryInFlight = new Map<string, Promise<ReturnType<HaClient['discoverEntitiesWithoutCache']> extends Promise<infer T> ? T : never>>();
+
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
@@ -177,7 +180,7 @@ export class HaClient {
     });
   }
 
-  async discoverEntities(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
+  private async discoverEntitiesWithoutCache(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
     const toStringValue = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : undefined;
     const normalizeEntityEntry = (entity: Record<string, unknown>): HaEntityRegistryEntry => ({
       entity_id: toStringValue(entity.ei) ?? toStringValue(entity.entity_id) ?? '',
@@ -311,6 +314,29 @@ export class HaClient {
           platform: registryEntry?.platform,
         };
       });
+  }
+
+  async discoverEntities(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
+    const key = domains.slice().sort().join('|');
+    const now = Date.now();
+    const cached = this.entityDiscoveryCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    const inFlight = this.entityDiscoveryInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const promise = this.discoverEntitiesWithoutCache(domains)
+      .then((value) => {
+        this.entityDiscoveryCache.set(key, { expiresAt: Date.now() + 10_000, value });
+        this.entityDiscoveryInFlight.delete(key);
+        return value;
+      })
+      .catch((error) => {
+        this.entityDiscoveryInFlight.delete(key);
+        throw error;
+      });
+
+    this.entityDiscoveryInFlight.set(key, promise);
+    return promise;
   }
 
   discoverLights() {
