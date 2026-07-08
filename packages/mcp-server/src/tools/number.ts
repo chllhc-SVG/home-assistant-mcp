@@ -4,7 +4,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { makeRequestId, now, writeAudit } from './shared.js';
+import { isEntityUnavailable, makeRequestId, now, writeAudit } from './shared.js';
 
 interface CreateNumberToolsDeps {
   registry: LightRegistry;
@@ -20,6 +20,10 @@ export const createNumberTools = ({ registry, policy, haClient, auditLogger }: C
     const policyCheck = policy.canSetValue(device, value);
     if (!policyCheck.allowed) return fail(policyCheck.reason, '数值实体不可设置或超出范围', { entity_id: entityId, value });
 
+    const stateBefore = await haClient.getState(entityId);
+    if (isEntityUnavailable(typeof stateBefore.state === 'string' ? stateBefore.state : undefined)) {
+      return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
+    }
     const response = await haClient.setNumberValue(entityId, value);
     const state = await haClient.getState(entityId);
     const requestId = makeRequestId();

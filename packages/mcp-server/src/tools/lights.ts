@@ -13,7 +13,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
+import { buildStateSummary, buildUnavailableError, isEntityUnavailable, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateLightToolsDeps {
   registry: LightRegistry;
@@ -156,6 +156,25 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
     if (!resolved.ok) return resolved.failure;
 
     const beforeState = await haClient.getState(entityId);
+    if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+      const requestId = makeRequestId();
+      await writeAudit(auditLogger, {
+        id: requestId,
+        request_id: requestId,
+        timestamp: now(),
+        source: 'mcp',
+        tool_name: desired === 'on' ? 'turn_on_light' : 'turn_off_light',
+        tool_args: { entity_id: entityId, before_state: 'unavailable' },
+        resolved_device: { display_name: resolved.device.display_name, entity_id: resolved.device.entity_id },
+        result: { success: false, error_code: 'DEVICE_UNAVAILABLE', state_after: 'unavailable' },
+        device_id: resolved.device.device_id,
+        entity_id: entityId,
+        error_code: 'DEVICE_UNAVAILABLE',
+        result_status: 'failure',
+      });
+      return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
+    }
+
     const beforeSummary = buildStateSummary(beforeState);
     const isLightEntity = entityId.startsWith('light.');
     const targetState = desired;
@@ -304,6 +323,9 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
       }
 
       const state = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof state.state === 'string' ? state.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
       return ok(state);
     },
 

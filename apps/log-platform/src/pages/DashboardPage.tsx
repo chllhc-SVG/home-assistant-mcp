@@ -21,6 +21,13 @@ const formatBeijingTime = (value?: string) => {
 
 const formatDeviceLabel = (device: DeviceRecord) => `${device.display_name} · ${device.entity_id.split('.')[1] ?? device.entity_id}`;
 
+const getEntityAvailability = (state?: string) => {
+  if (!state) return { text: '未知', color: 'default' as const, online: false };
+  if (state === 'unavailable') return { text: '离线', color: 'red' as const, online: false };
+  if (state === 'unknown') return { text: '未知', color: 'default' as const, online: false };
+  return { text: '在线', color: 'green' as const, online: true };
+};
+
 const fallbackDevices: DeviceRecord[] = [
   { device_id: 'switch_xiaomi_w2_2de4_left_switch_service', display_name: '测试间主灯', entity_id: 'switch.xiaomi_w2_2de4_left_switch_service', room: '5f_lounge', domain: 'switch', type: 'switch', enabled: true },
 ];
@@ -171,6 +178,9 @@ export const DashboardPage = () => {
     if (!selectedDevice) return;
     setControlLoading(true);
     try {
+      if (selectedDevice.state === 'unavailable') {
+        throw new Error('设备离线，无法执行控制指令');
+      }
       if (action === 'on' && (selectedDevice.domain === 'light' || selectedDevice.domain === 'switch')) await api.turnOnSwitch(selectedDevice.entity_id);
       if (action === 'off' && (selectedDevice.domain === 'light' || selectedDevice.domain === 'switch')) await api.turnOffSwitch(selectedDevice.entity_id);
       if (action === 'brightness') await api.setLightBrightness(selectedDevice.entity_id, brightness);
@@ -196,7 +206,8 @@ export const DashboardPage = () => {
     setControlLoading(true);
     try {
       const state = selectedDevice.domain === 'sensor' ? await api.getSensorState(selectedDevice.entity_id) : selectedDevice.domain === 'climate' ? await api.getClimateState(selectedDevice.entity_id) : selectedDevice.domain === 'switch' ? await api.getSwitchState(selectedDevice.entity_id) : selectedDevice.domain === 'button' ? await api.getButtonState(selectedDevice.entity_id) : selectedDevice.domain === 'number' ? await api.getNumberState(selectedDevice.entity_id) : await api.getLightState(selectedDevice.entity_id);
-      messageApi.info(`当前状态：${String(state.state ?? 'unknown')}`);
+      const availability = getEntityAvailability(String(state.state ?? selectedDevice.state ?? 'unknown'));
+      messageApi.info(`当前状态：${String(state.state ?? 'unknown')}（${availability.text}）`);
       void refreshLogs();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : '查询失败');
@@ -273,6 +284,9 @@ export const DashboardPage = () => {
     return true;
   });
   const filteredDevices = deviceDomainFilter === 'all' ? devices : devices.filter((device) => device.domain === deviceDomainFilter);
+  const whitelistDeviceNames = Array.from(new Set(whitelistDevices.map((device) => device.device_name).filter(Boolean)));
+  const exposedDeviceNames = Array.from(new Set(whitelistDevices.filter((device) => exposedDevices.includes(device.entity_id)).map((device) => device.device_name).filter(Boolean)));
+  const unexposedDeviceCount = Math.max(whitelistDeviceNames.length - exposedDeviceNames.length, 0);
   const selectedRooms = Array.from(new Set(whitelistDevices.filter((device) => exposedDevices.includes(device.entity_id)).map((device) => device.room).filter(Boolean))) as string[];
   const allAreas = Array.from(new Set(whitelistDevices.map((device) => device.area_name).filter(Boolean))) as string[];
   const deviceTypeOptions = [
@@ -400,8 +414,8 @@ export const DashboardPage = () => {
               <Space direction="vertical" size={16} style={{ width: '100%' }}>
                 <Select style={{ width: '100%' }} value={deviceDomainFilter} options={deviceTypeOptions} onChange={setDeviceDomainFilter} placeholder="筛选设备类型" />
                 <Select style={{ width: '100%' }} value={selectedDevice?.entity_id} placeholder="选择设备" options={filteredDevices.map((device) => ({ label: formatDeviceLabel(device), value: device.entity_id }))} onChange={(entityId) => { const nextDevice = devices.find((device) => device.entity_id === entityId) ?? null; setSelectedDevice(nextDevice); if (typeof nextDevice?.brightness === 'number') setBrightness(nextDevice.brightness); if (typeof nextDevice?.target_temperature === 'number') setTargetTemperature(nextDevice.target_temperature); }} />
-                <Table size="small" rowKey="entity_id" pagination={{ pageSize: 5 }} dataSource={filteredDevices} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: '类型', dataIndex: 'domain', render: (value: string) => <Tag>{value}</Tag> }, { title: '状态', dataIndex: 'state', render: (value?: string) => <Tag color={value === 'on' ? 'green' : 'default'}>{value ?? '-'}</Tag> }, { title: '启用', dataIndex: 'enabled', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} onRow={(record) => ({ onClick: () => { const nextDevice = devices.find((device) => device.entity_id === record.entity_id) ?? null; setSelectedDevice(nextDevice); } })} />
-                {selectedDevice ? <Descriptions bordered size="small" column={1}><Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item><Descriptions.Item label="实体 ID">{selectedDevice.entity_id}</Descriptions.Item><Descriptions.Item label="显示名">{formatDeviceLabel(selectedDevice)}</Descriptions.Item><Descriptions.Item label="类型">{selectedDevice.domain ?? '-'}</Descriptions.Item><Descriptions.Item label="当前状态">{selectedDevice.state ?? '-'}</Descriptions.Item><Descriptions.Item label="房间">{selectedDevice.room ?? '-'}</Descriptions.Item><Descriptions.Item label="亮度能力">{selectedDevice.supports_brightness ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="色温能力">{selectedDevice.domain === 'light' ? <Tag color="green">支持</Tag> : <Tag>不适用</Tag>}</Descriptions.Item><Descriptions.Item label="色温范围">{selectedDevice.domain === 'light' ? `${selectedDevice.color_temp_min_kelvin ?? 3000}K ~ ${selectedDevice.color_temp_max_kelvin ?? 6400}K` : '-'}</Descriptions.Item><Descriptions.Item label="数值能力">{selectedDevice.supports_value ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="温度能力">{selectedDevice.supports_temperature ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="HVAC 模式">{selectedDevice.hvac_modes?.length ? selectedDevice.hvac_modes.join(', ') : '-'}</Descriptions.Item><Descriptions.Item label="传感器值">{selectedDevice.sensor_value === undefined ? '-' : `${selectedDevice.sensor_value}${selectedDevice.sensor_unit ?? ''}`}</Descriptions.Item><Descriptions.Item label="能力来源">{selectedDevice.capability_source === 'home_assistant' ? <Tag color="blue">Home Assistant</Tag> : <Tag>配置</Tag>}</Descriptions.Item></Descriptions> : null}
+                <Table size="small" rowKey="entity_id" pagination={{ pageSize: 5 }} dataSource={filteredDevices} columns={[{ title: '设备名', dataIndex: 'display_name' }, { title: '类型', dataIndex: 'domain', align: 'center', render: (value: string) => <Tag style={{ margin: 0 }}>{value}</Tag> }, { title: '在线状态', dataIndex: 'state', align: 'center', render: (value?: string) => { const availability = getEntityAvailability(value); return <Tag color={availability.color}>{availability.text}</Tag>; } }, { title: '启用', dataIndex: 'enabled', align: 'center', render: (value?: boolean) => <Tag color={value === false ? 'red' : 'green'}>{value === false ? '禁用' : '启用'}</Tag> }]} onRow={(record) => ({ onClick: () => { const nextDevice = devices.find((device) => device.entity_id === record.entity_id) ?? null; setSelectedDevice(nextDevice); } })} />
+                {selectedDevice ? <Descriptions bordered size="small" column={1}><Descriptions.Item label="设备名">{selectedDevice.display_name}</Descriptions.Item><Descriptions.Item label="实体 ID">{selectedDevice.entity_id}</Descriptions.Item><Descriptions.Item label="显示名">{formatDeviceLabel(selectedDevice)}</Descriptions.Item><Descriptions.Item label="类型">{selectedDevice.domain ?? '-'}</Descriptions.Item><Descriptions.Item label="在线状态"><Tag color={getEntityAvailability(selectedDevice.state).color}>{getEntityAvailability(selectedDevice.state).text}</Tag></Descriptions.Item><Descriptions.Item label="当前状态">{selectedDevice.state ?? '-'}</Descriptions.Item><Descriptions.Item label="房间">{selectedDevice.room ?? '-'}</Descriptions.Item><Descriptions.Item label="亮度能力">{selectedDevice.supports_brightness ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="色温能力">{selectedDevice.domain === 'light' ? <Tag color="green">支持</Tag> : <Tag>不适用</Tag>}</Descriptions.Item><Descriptions.Item label="色温范围">{selectedDevice.domain === 'light' ? `${selectedDevice.color_temp_min_kelvin ?? 3000}K ~ ${selectedDevice.color_temp_max_kelvin ?? 6400}K` : '-'}</Descriptions.Item><Descriptions.Item label="数值能力">{selectedDevice.supports_value ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="温度能力">{selectedDevice.supports_temperature ? <Tag color="green">支持</Tag> : <Tag>不支持</Tag>}</Descriptions.Item><Descriptions.Item label="HVAC 模式">{selectedDevice.hvac_modes?.length ? selectedDevice.hvac_modes.join(', ') : '-'}</Descriptions.Item><Descriptions.Item label="传感器值">{selectedDevice.sensor_value === undefined ? '-' : `${selectedDevice.sensor_value}${selectedDevice.sensor_unit ?? ''}`}</Descriptions.Item><Descriptions.Item label="能力来源">{selectedDevice.capability_source === 'home_assistant' ? <Tag color="blue">Home Assistant</Tag> : <Tag>配置</Tag>}</Descriptions.Item></Descriptions> : null}
                 {renderControlPanel()}
               </Space>
             </Card>
@@ -452,8 +466,8 @@ export const DashboardPage = () => {
             <Alert type="info" showIcon style={{ marginBottom: 16 }} message="页面加载时会自动发现一次 Home Assistant 设备。下面的表格同时支持发现浏览和白名单勾选。" />
             <Space wrap style={{ marginBottom: 12 }}>
               <Tag color="blue">发现实体 {discoveredEntities.length}</Tag>
-              <Tag color="green">白名单设备 {combinedDevices.filter((device) => exposedDevices.includes(device.entity_id)).length}</Tag>
-              <Tag color="gold">未暴露设备 {Math.max(combinedDevices.length - exposedDevices.length, 0)}</Tag>
+              <Tag color="green">白名单设备 {exposedDeviceNames.length}</Tag>
+              <Tag color="gold">未暴露设备 {unexposedDeviceCount}</Tag>
             </Space>
             <Space wrap style={{ marginBottom: 12 }}>
               <Input allowClear placeholder="按名称 / 设备名筛选" value={whitelistKeyword} onChange={(e) => setWhitelistKeyword(e.target.value)} style={{ width: 260 }} />

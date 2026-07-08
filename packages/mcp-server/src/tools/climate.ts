@@ -11,7 +11,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
+import { buildStateSummary, isEntityUnavailable, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateClimateToolsDeps {
   registry: LightRegistry;
@@ -79,6 +79,9 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调温度控制被拒绝', { entity_id: parsed.entity_id, temperature: parsed.temperature });
 
       const beforeState = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
       const response = await haClient.setClimateTemperature(parsed.entity_id, parsed.temperature);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
@@ -95,6 +98,9 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调模式控制被拒绝', { entity_id: parsed.entity_id, hvac_mode: parsed.hvac_mode });
 
       const beforeState = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
       const response = await haClient.setClimateHvacMode(parsed.entity_id, parsed.hvac_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
@@ -112,6 +118,9 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调风扇模式控制被拒绝', { entity_id: parsed.entity_id, fan_mode: parsed.fan_mode });
 
       const beforeState = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
       const response = await haClient.setClimateFanMode(parsed.entity_id, parsed.fan_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
@@ -128,6 +137,9 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       if (!policyCheck.allowed) return fail(policyCheck.reason, '空调摆风模式控制被拒绝', { entity_id: parsed.entity_id, swing_mode: parsed.swing_mode });
 
       const beforeState = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
       const response = await haClient.setClimateSwingMode(parsed.entity_id, parsed.swing_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);

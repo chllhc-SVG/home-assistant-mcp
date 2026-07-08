@@ -15,6 +15,14 @@ export type StateSummary = {
   swing_mode_after?: string;
 };
 
+export const isEntityUnavailable = (state?: string) => state === 'unavailable';
+
+export const buildUnavailableError = (entityId: string, state?: string) => ({
+  error_code: 'DEVICE_UNAVAILABLE' as const,
+  message: '设备离线',
+  details: { entity_id: entityId, state: state ?? 'unknown' },
+});
+
 const resolveColorTempKelvin = (attributes: Record<string, unknown> | undefined) => {
   if (!attributes) return undefined;
   if (typeof attributes.color_temp_kelvin === 'number') return attributes.color_temp_kelvin;

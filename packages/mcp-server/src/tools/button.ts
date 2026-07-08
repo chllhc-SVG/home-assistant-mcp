@@ -4,7 +4,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { makeRequestId, now, writeAudit } from './shared.js';
+import { isEntityUnavailable, makeRequestId, now, writeAudit } from './shared.js';
 
 interface CreateButtonToolsDeps {
   registry: LightRegistry;
@@ -20,6 +20,10 @@ export const createButtonTools = ({ registry, policy, haClient, auditLogger }: C
     const policyCheck = policy.canPressButton(device);
     if (!policyCheck.allowed) return fail(policyCheck.reason, '按钮不可用或不允许操作', { entity_id: entityId });
 
+    const stateBefore = await haClient.getState(entityId);
+    if (isEntityUnavailable(typeof stateBefore.state === 'string' ? stateBefore.state : undefined)) {
+      return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
+    }
     const response = await haClient.pressButton(entityId);
     const state = await haClient.getState(entityId);
     const requestId = makeRequestId();
