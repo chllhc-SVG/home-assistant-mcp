@@ -76,6 +76,38 @@ body {
   padding: 24px;
 }
 
+.section-card .ant-table-wrapper {
+  overflow: visible;
+}
+
+.section-card .ant-table-pagination {
+  position: relative;
+  z-index: 2;
+}
+
+.section-card .ant-pagination,
+.section-card .ant-pagination * {
+  pointer-events: auto;
+}
+
+.section-card .ant-pagination {
+  position: relative;
+  z-index: 20;
+}
+
+.section-card .ant-pagination-options,
+.section-card .ant-pagination-options-size-changer,
+.section-card .ant-select,
+.section-card .ant-select-selector {
+  pointer-events: auto;
+  position: relative;
+  z-index: 21;
+}
+
+.ant-select-dropdown {
+  z-index: 3000;
+}
+
 .metric-card {
   border-radius: 22px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);

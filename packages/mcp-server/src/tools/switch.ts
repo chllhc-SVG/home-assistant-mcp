@@ -4,7 +4,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, hasExpectedPowerState, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
+import { buildStateSummary, buildUnavailableError, hasExpectedPowerState, isEntityUnavailable, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateSwitchToolsDeps {
   registry: LightRegistry;
@@ -21,6 +21,9 @@ export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: C
     if (!policyCheck.allowed || !device) return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '开关不可用或不允许操作', { entity_id: entityId });
 
     const beforeState = await haClient.getState(entityId);
+    if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
+      return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
+    }
     const beforeSummary = buildStateSummary(beforeState);
     const response = toolName === 'turn_on_switch' ? await haClient.turnOn(entityId) : await haClient.turnOff(entityId);
     const callState = await haClient.getState(entityId);
@@ -75,7 +78,11 @@ export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: C
       const policyCheck = policy.canControlSwitch(device);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '开关不可用或不允许查询', { entity_id: parsed.entity_id });
 
-      return ok(await haClient.getState(parsed.entity_id));
+      const state = await haClient.getState(parsed.entity_id);
+      if (isEntityUnavailable(typeof state.state === 'string' ? state.state : undefined)) {
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+      }
+      return ok(state);
     },
   };
 };
