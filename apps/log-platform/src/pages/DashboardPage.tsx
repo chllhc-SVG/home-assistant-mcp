@@ -295,13 +295,14 @@ export const DashboardPage = () => {
   const saveExposure = async () => {
     setExposureLoading(true);
     try {
-      const selectedEntityIds = Array.from(new Set([...exposedDevices, ...Object.values(deviceEntitySelection).filter((value): value is string => Boolean(value))]));
+      const selectedEntityIds = Array.from(new Set(exposedDevices));
       const payload: DeviceExposureConfig = {
         rooms: [],
         devices: selectedEntityIds,
       };
       const result = await api.saveDeviceExposure(payload);
       setExposedDevices(result.devices);
+      setDeviceEntitySelection(Object.fromEntries(result.devices.map((entityId) => [entityId, entityId])));
       messageApi.success(`白名单已保存，当前选择 ${result.devices.length} 个实体`);
       await loadData();
       void discoverEntities();

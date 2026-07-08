@@ -230,6 +230,13 @@ export const createServer = ({ audit, registry, tools, haClient, whitelistStore,
       if (action === 'delete') {
         await whitelistStore.delete(selectedEntityIds);
       } else {
+        const existingRecords = await whitelistStore.list();
+        const existingEntityIds = existingRecords.map((record) => record.entity_id);
+        const entityIdsToDelete = existingEntityIds.filter((entityId) => !selectedEntityIds.includes(entityId));
+        if (entityIdsToDelete.length > 0) {
+          await whitelistStore.delete(entityIdsToDelete);
+        }
+
         const discovered = await haClient.discoverEntities();
         const discoveredByEntityId = new Map(discovered.map((device) => [device.entity_id, device]));
         const records = selectedEntityIds.map((entityId) => {
