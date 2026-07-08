@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import type { DeviceExposureConfig, LightDevice } from './models/types.js';
+import type { DeviceExposureConfig } from './models/types.js';
 
 export interface AppConfig {
   homeAssistantBaseUrl: string;
   homeAssistantToken: string;
   timeoutMs: number;
-  lights: LightDevice[];
+  databaseUrl: string;
   exposure: DeviceExposureConfig;
 }
 
@@ -67,9 +67,6 @@ export const loadConfig = (): AppConfig => {
   loadEnv();
 
   const workspaceRoot = resolveWorkspaceRoot();
-  const configPath = resolveLightsConfigPath();
-  const raw = readFileSync(configPath, 'utf8');
-  const parsed = JSON.parse(raw) as { lights: LightDevice[] };
   const exposurePath = resolve(workspaceRoot, 'config', 'device-exposure.json');
   const exposure = existsSync(exposurePath)
     ? JSON.parse(readFileSync(exposurePath, 'utf8')) as DeviceExposureConfig
@@ -80,11 +77,16 @@ export const loadConfig = (): AppConfig => {
     throw new Error('HOME_ASSISTANT_TOKEN/HA_TOKEN is empty after loading .env. Please check workspace root .env.');
   }
 
+  const databaseUrl = process.env.DATABASE_URL ?? '';
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is empty. Please configure Postgres connection for whitelist persistence.');
+  }
+
   return {
     homeAssistantBaseUrl: process.env.HOME_ASSISTANT_BASE_URL ?? 'http://192.168.150.11:8123',
     homeAssistantToken: token,
     timeoutMs: Number(process.env.HOME_ASSISTANT_TIMEOUT_MS ?? 15000),
-    lights: parsed.lights,
+    databaseUrl,
     exposure,
   };
 };

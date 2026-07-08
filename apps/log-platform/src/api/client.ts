@@ -125,6 +125,19 @@ export interface DiscoveredEntity {
 
 export type DiscoveredLight = DiscoveredEntity;
 
+export interface DeviceExposureRecord {
+  entity_id: string;
+  display_name: string;
+  friendly_name?: string;
+  device_id: string;
+  device_name?: string;
+  domain: 'light' | 'switch' | 'button' | 'number' | 'climate' | 'sensor';
+  room: string;
+  area_id?: string;
+  area_name?: string;
+  enabled: boolean;
+}
+
 export interface DeviceExposureConfig {
   rooms: Array<{ room: string; enabled: boolean }>;
   devices: string[];
@@ -185,9 +198,11 @@ export const api = {
   getFailureStats: () => request<FailureStats>('/api/admin/stats/errors'),
   listLogs: (params = new URLSearchParams()) => request<PaginatedLogResponse>(`/api/admin/logs?${params.toString()}`),
   getLogById: (id: string) => request<LogRecord>(`/api/admin/logs/${id}`),
+  deleteLog: (id: string) => request<{ deleted: boolean }>(`/api/admin/logs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteLogs: (ids: string[]) => request<{ deleted: number }>('/api/admin/logs/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   listDevices: () => request<{ devices: DeviceRecord[] }>('/api/admin/devices'),
-  getDeviceExposure: () => request<{ exposure: string[] }>('/api/admin/device-exposure'),
-  saveDeviceExposure: (payload: DeviceExposureConfig) => request<{ saved: boolean }>('/api/admin/device-exposure', { method: 'POST', body: JSON.stringify(payload) }),
+  getDeviceExposure: () => request<{ exposure: string[]; records: DeviceExposureRecord[] }>('/api/admin/device-exposure'),
+  saveDeviceExposure: (payload: DeviceExposureConfig & { action?: 'upsert' | 'delete' }) => request<{ saved: boolean; devices: string[] }>('/api/admin/device-exposure', { method: 'POST', body: JSON.stringify(payload) }),
   discoverLights: () => request<{ lights: DiscoveredLight[] }>('/api/admin/ha/lights/discover'),
   discoverEntities: () => request<{ entities: DiscoveredEntity[] }>('/api/admin/ha/entities/discover'),
   getLightState: (entityId: string) => request<Record<string, unknown>>(`/api/control/lights/${encodeURIComponent(entityId)}/state`),

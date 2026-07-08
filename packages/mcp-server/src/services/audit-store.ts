@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import type { AuditEvent, AuditQuery, AuditSummary } from '../models/types.js';
 
@@ -12,8 +10,6 @@ export interface AuditPage {
 }
 
 const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
-const legacyJsonPath = resolve(process.env.AUDIT_JSON_PATH ?? 'data/audit-log.json');
-
 if (!connectionString) {
   throw new Error('DATABASE_URL or POSTGRES_URL is required for audit log storage');
 }
@@ -85,18 +81,6 @@ const toRecord = (row: Record<string, unknown>): AuditEvent => ({
   result: row.result as AuditEvent['result'],
 });
 
-const readLegacyJsonEvents = (): AuditEvent[] => {
-  if (!existsSync(legacyJsonPath)) return [];
-  const raw = readFileSync(legacyJsonPath, 'utf8').trim();
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as { records?: AuditEvent[] };
-    return Array.isArray(parsed.records) ? parsed.records : [];
-  } catch {
-    return [];
-  }
-};
-
 export const auditStore = {
   async push(event: AuditEvent) {
     const record = normalize(event);
@@ -123,13 +107,8 @@ export const auditStore = {
       [record.id, record.request_id, record.timestamp, record.source, record.tool_name, record.user_input ?? null, record.intent ?? null, JSON.stringify(record.resolved_device ?? null), JSON.stringify(record.tool_args), JSON.stringify(record.ha_request ?? null), JSON.stringify(record.ha_response ?? null), JSON.stringify(record.result), record.duration_ms ?? null, record.device_id ?? null, record.entity_id ?? null, record.error_code ?? null, record.result_status ?? null],
     );
   },
-  async seed(events: AuditEvent[]) {
-    const legacyEvents = readLegacyJsonEvents();
-    const combined = [...legacyEvents, ...events];
-    if (combined.length === 0) return;
-    for (const event of combined) {
-      await this.push(event);
-    }
+  async seed(_events: AuditEvent[]) {
+    await pool.query("delete from audit_logs where intent = 'seed' or user_input = 'seed'");
   },
   async query(query: AuditQuery = {}): Promise<AuditPage> {
     const pageSize = Math.max(1, Math.min(query.limit ?? 20, 100));
@@ -145,6 +124,16 @@ export const auditStore = {
   async getByRequestId(requestId: string) {
     const { rows } = await pool.query('select * from audit_logs where request_id = $1 limit 1', [requestId]);
     return rows[0] ? toRecord(rows[0]) : undefined;
+  },
+  async deleteById(id: string) {
+    const { rows } = await pool.query('delete from audit_logs where id = $1 or request_id = $1 returning id', [id]);
+    return rows.length > 0;
+  },
+  async deleteMany(ids: string[]) {
+    const uniqueIds = Array.from(new Set(ids.filter((id) => id.trim().length > 0)));
+    if (uniqueIds.length === 0) return 0;
+    const { rows } = await pool.query('delete from audit_logs where id = any($1::text[]) or request_id = any($1::text[]) returning id', [uniqueIds]);
+    return rows.length;
   },
   async summary(): Promise<AuditSummary> {
     const { rows } = await pool.query('select result from audit_logs');

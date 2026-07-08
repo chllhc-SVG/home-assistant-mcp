@@ -5,9 +5,8 @@ import { createRuntime } from './runtime.js';
 import { startMcp } from './mcp.js';
 import { createMcpHttpRouter } from './mcp-http.js';
 
-const runtime = createRuntime();
-
 const boot = async () => {
+  const runtime = await createRuntime();
   await auditStore.seed(runtime.seedEvents);
 
   const mcpMode = process.env.MCP_MODE ?? 'http';
@@ -23,6 +22,7 @@ const boot = async () => {
     registry: runtime.registry,
     tools: runtime.tools,
     haClient: runtime.haClient,
+    whitelistStore: runtime.whitelistStore,
   });
   adminApp.listen(adminPort, () => {
     console.log(`admin api listening on ${adminPort}`);
@@ -34,6 +34,7 @@ const boot = async () => {
     registry: runtime.registry,
     tools: runtime.tools,
     haClient: runtime.haClient,
+    whitelistStore: runtime.whitelistStore,
     mcpRouter: createMcpHttpRouter(runtime),
   });
   mcpApp.listen(mcpPort, () => {
@@ -45,4 +46,4 @@ if (process.env.NODE_ENV !== 'test') {
   void boot();
 }
 
-export const tools = runtime.tools;
+export let tools: ReturnType<typeof import('./tools/index.js').createTools>;
