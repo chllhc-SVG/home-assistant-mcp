@@ -11,6 +11,12 @@ export interface LogRecord {
   duration_ms?: number;
   resolved_device?: { display_name: string; entity_id: string };
   tool_args?: Record<string, unknown>;
+  ha_response?: {
+    mcp_result?: unknown;
+    error?: string;
+    [key: string]: unknown;
+  };
+  result?: Record<string, unknown>;
 }
 
 export interface OverviewStats {

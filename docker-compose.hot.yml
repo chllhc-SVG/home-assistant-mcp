@@ -1,0 +1,80 @@
+name: home-assistant-mcp-control-hot
+
+services:
+  postgres:
+    container_name: home-assistant-mcp-postgres
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: home_assistant_mcp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d home_assistant_mcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  mcp-server:
+    container_name: home-assistant-mcp-server
+    build:
+      context: .
+      dockerfile: packages/mcp-server/Dockerfile
+      target: build
+    command: pnpm --filter @enterprise/mcp-server dev
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/home_assistant_mcp
+      HOME_ASSISTANT_TIMEOUT_MS: ${HOME_ASSISTANT_TIMEOUT_MS:-15000}
+      LIGHTS_CONFIG_PATH: /app/config/lights.json
+      MCP_HTTP_PORT: 4010
+      ADMIN_WEB_PORT: 4000
+      NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+      TSC_WATCHFILE: UseFsEventsWithFallbackDynamicPolling
+    volumes:
+      - .:/app
+      - hot_root_node_modules:/app/node_modules
+      - hot_mcp_node_modules:/app/packages/mcp-server/node_modules
+      - ./config:/app/config:ro
+    ports:
+      - "4000:4000"
+      - "4010:4010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  log-platform:
+    container_name: home-assistant-log-platform
+    build:
+      context: .
+      dockerfile: apps/log-platform/Dockerfile
+      target: build
+    command: pnpm --filter @enterprise/log-platform dev --host 0.0.0.0 --port 5175
+    environment:
+      VITE_ADMIN_API_BASE_URL: http://127.0.0.1:4000
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - .:/app
+      - hot_root_node_modules:/app/node_modules
+      - hot_log_platform_node_modules:/app/apps/log-platform/node_modules
+    ports:
+      - "5175:5175"
+    depends_on:
+      - mcp-server
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  hot_root_node_modules:
+  hot_mcp_node_modules:
+  hot_log_platform_node_modules:

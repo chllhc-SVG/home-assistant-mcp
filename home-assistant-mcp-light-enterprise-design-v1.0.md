@@ -468,7 +468,7 @@ pnpm start
 ```bash
 pnpm docker:dev
 ```
-
+4
 这个命令会：
 
 - 检查 `.env`

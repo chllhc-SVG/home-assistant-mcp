@@ -33,10 +33,11 @@ const failFromError = (fallbackMessage: string, error: unknown) => {
 };
 
 const toAuditQuery = (query: express.Request['query']): AuditQuery => {
-  const { keyword, tool_name, device_name, status, from, to, limit, offset } = query;
+  const { keyword, tool_name, intent, device_name, status, from, to, limit, offset } = query;
   return {
     keyword: typeof keyword === 'string' ? keyword : undefined,
     tool_name: typeof tool_name === 'string' ? tool_name : undefined,
+    intent: typeof intent === 'string' ? intent : undefined,
     device_name: typeof device_name === 'string' ? device_name : undefined,
     status: status === 'success' || status === 'failure' ? status : undefined,
     from: typeof from === 'string' ? from : undefined,

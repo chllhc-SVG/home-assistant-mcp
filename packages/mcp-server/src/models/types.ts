@@ -200,6 +200,7 @@ export interface AuditEvent {
 export interface AuditQuery {
   keyword?: string;
   tool_name?: string;
+  intent?: string;
   device_name?: string;
   status?: 'success' | 'failure';
   from?: string;

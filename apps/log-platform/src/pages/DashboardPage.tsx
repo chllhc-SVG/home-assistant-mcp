@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Badge, Button, Card, Checkbox, Col, Descriptions, Drawer, Empty, Form, Input, Menu, Row, Select, Slider, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Card, Checkbox, Col, Descriptions, Drawer, Empty, Form, Input, Menu, Row, Select, Slider, Space, Statistic, Table, Tabs, Tag, Typography, message } from 'antd';
 import { ApiOutlined, AppstoreOutlined, BulbOutlined, CheckCircleOutlined, CompassOutlined, FilterOutlined, FireOutlined, PoweroffOutlined, ReloadOutlined, SearchOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { api, type DeviceExposureConfig, type DeviceRecord, type DiscoveredEntity, type LogRecord } from '../api/client';
 
@@ -21,6 +21,25 @@ const formatBeijingTime = (value?: string) => {
 
 const formatDeviceLabel = (device: DeviceRecord) => `${device.display_name} · ${device.entity_id.split('.')[1] ?? device.entity_id}`;
 
+const formatToolArgs = (value?: Record<string, unknown>) => {
+  if (!value || Object.keys(value).length === 0) return '-';
+  const text = JSON.stringify(value);
+  return text.length > 72 ? `${text.slice(0, 72)}...` : text;
+};
+
+const formatJsonPreview = (value: unknown, maxLength = 96) => {
+  if (value === undefined || value === null) return '-';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+};
+
+const formatJsonBlock = (value: unknown) => {
+  if (value === undefined || value === null) return '-';
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+};
+
+const getMcpReturnData = (record: LogRecord) => record.ha_response?.mcp_result ?? record.ha_response ?? record.result;
+
 const fallbackDevices: DeviceRecord[] = [];
 
 const fallbackLogs: LogRecord[] = [
@@ -40,6 +59,7 @@ const fallbackLogs: LogRecord[] = [
 export const DashboardPage = () => {
   const [form] = Form.useForm();
   const [logs, setLogs] = React.useState<LogRecord[]>(fallbackLogs);
+  const [mcpLogs, setMcpLogs] = React.useState<LogRecord[]>([]);
   const [devices, setDevices] = React.useState<DeviceRecord[]>(fallbackDevices);
   const [discoveredEntities, setDiscoveredEntities] = React.useState<DiscoveredEntity[]>([]);
   const [selectedDevice, setSelectedDevice] = React.useState<DeviceRecord | null>(null);
@@ -67,6 +87,7 @@ export const DashboardPage = () => {
   const [deviceEntitySelection, setDeviceEntitySelection] = React.useState<Record<string, string | undefined>>({});
   const [deviceExposureRecords, setDeviceExposureRecords] = React.useState<DeviceRecord[]>([]);
   const [selectedLogIds, setSelectedLogIds] = React.useState<React.Key[]>([]);
+  const [selectedMcpLogIds, setSelectedMcpLogIds] = React.useState<React.Key[]>([]);
   const [selectedDeviceIds, setSelectedDeviceIds] = React.useState<React.Key[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
   const deviceSectionRef = React.useRef<HTMLDivElement>(null);
@@ -76,17 +97,22 @@ export const DashboardPage = () => {
   const loadData = React.useCallback(async (query?: URLSearchParams) => {
     setLoading(true);
     try {
-      const [overviewResult, failureResult, logsResult, devicesResult, exposureResult] = await Promise.allSettled([
+      const mcpLogParams = new URLSearchParams(query);
+      mcpLogParams.set('intent', 'mcp_tool_call');
+      const [overviewResult, failureResult, logsResult, mcpLogsResult, devicesResult, exposureResult] = await Promise.allSettled([
         api.getOverview(),
         api.getFailureStats(),
         api.listLogs(query),
+        api.listLogs(mcpLogParams),
         api.listDevices(),
         api.getDeviceExposure(),
       ]);
 
       if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
       if (failureResult.status === 'fulfilled') setFailureStats(failureResult.value);
-      setLogs(logsResult.status === 'fulfilled' && logsResult.value.items.length > 0 ? logsResult.value.items : fallbackLogs);
+      const controlLogs = logsResult.status === 'fulfilled' ? logsResult.value.items.filter((log) => log.intent !== 'mcp_tool_call') : [];
+      setLogs(controlLogs.length > 0 ? controlLogs : fallbackLogs);
+      setMcpLogs(mcpLogsResult.status === 'fulfilled' ? mcpLogsResult.value.items : []);
 
       const nextDevices = devicesResult.status === 'fulfilled' ? devicesResult.value.devices : [];
       const normalizedDevices = nextDevices.length > 0 ? nextDevices : fallbackDevices;
@@ -391,8 +417,11 @@ export const DashboardPage = () => {
 
   const deleteLog = async (id: string) => {
     const previousLogs = logs;
+    const previousMcpLogs = mcpLogs;
     setLogs((current) => current.filter((log) => log.id !== id && log.request_id !== id));
+    setMcpLogs((current) => current.filter((log) => log.id !== id && log.request_id !== id));
     setSelectedLogIds((current) => current.filter((key) => key !== id));
+    setSelectedMcpLogIds((current) => current.filter((key) => key !== id));
     try {
       await api.deleteLog(id);
       messageApi.success('日志已删除');
@@ -402,6 +431,7 @@ export const DashboardPage = () => {
       });
     } catch (error) {
       setLogs(previousLogs);
+      setMcpLogs(previousMcpLogs);
       messageApi.error(error instanceof Error ? error.message : '删除日志失败');
     }
   };
@@ -426,12 +456,43 @@ export const DashboardPage = () => {
     }
   };
 
+  const deleteSelectedMcpLogs = async () => {
+    const ids = selectedMcpLogIds.map(String);
+    if (ids.length === 0) return;
+    const previousMcpLogs = mcpLogs;
+    setMcpLogs((current) => current.filter((log) => !ids.includes(log.id) && !ids.includes(log.request_id)));
+    setSelectedMcpLogIds([]);
+    try {
+      const result = await api.deleteLogs(ids);
+      messageApi.success(`已删除 ${result.deleted} 条 MCP 调用日志`);
+      void Promise.allSettled([api.getOverview(), api.getFailureStats()]).then(([overviewResult, failureResult]) => {
+        if (overviewResult.status === 'fulfilled') setOverview(overviewResult.value);
+        if (failureResult.status === 'fulfilled') setFailureStats(failureResult.value);
+      });
+    } catch (error) {
+      setMcpLogs(previousMcpLogs);
+      setSelectedMcpLogIds(ids);
+      messageApi.error(error instanceof Error ? error.message : '批量删除 MCP 调用日志失败');
+    }
+  };
+
   const logColumns = [
     { title: '时间', dataIndex: 'timestamp', width: 220, render: (value: string) => formatBeijingTime(value) },
     { title: '设备', render: (_: unknown, record: LogRecord) => record.resolved_device?.display_name ?? record.device_name ?? '-' },
     { title: '工具', dataIndex: 'tool_name' },
     { title: '意图', dataIndex: 'intent', render: (value?: string) => value ?? '-' },
     { title: '结果', dataIndex: 'result_status', render: (value: LogRecord['result_status']) => (value === 'success' ? <Tag color="green">成功</Tag> : <Tag color="red">失败</Tag>) },
+    { title: '耗时(ms)', dataIndex: 'duration_ms', width: 120 },
+    { title: '操作', width: 100, render: (_: unknown, record: LogRecord) => <Button danger size="small" onClick={(event) => { event.stopPropagation(); void deleteLog(record.id ?? record.request_id); }}>删除</Button> },
+  ];
+
+  const mcpLogColumns = [
+    { title: '时间', dataIndex: 'timestamp', width: 220, render: (value: string) => formatBeijingTime(value) },
+    { title: 'MCP 工具', dataIndex: 'tool_name' },
+    { title: '调用参数', dataIndex: 'tool_args', render: (value?: Record<string, unknown>) => <Typography.Text code>{formatToolArgs(value)}</Typography.Text> },
+    { title: '返回数据', render: (_: unknown, record: LogRecord) => <Typography.Text code>{formatJsonPreview(getMcpReturnData(record))}</Typography.Text> },
+    { title: 'entity_id', render: (_: unknown, record: LogRecord) => record.resolved_device?.entity_id ?? (record.tool_args?.entity_id === undefined ? '-' : String(record.tool_args.entity_id)) },
+    { title: '结果', dataIndex: 'result_status', width: 100, render: (value: LogRecord['result_status']) => (value === 'success' ? <Tag color="green">成功</Tag> : <Tag color="red">失败</Tag>) },
     { title: '耗时(ms)', dataIndex: 'duration_ms', width: 120 },
     { title: '操作', width: 100, render: (_: unknown, record: LogRecord) => <Button danger size="small" onClick={(event) => { event.stopPropagation(); void deleteLog(record.id ?? record.request_id); }}>删除</Button> },
   ];
@@ -485,18 +546,43 @@ export const DashboardPage = () => {
           </section>
 
           <section ref={logsSectionRef}>
-            <Card title={<Space><FilterOutlined />日志查询与控制审计</Space>} bordered={false} className="section-card" extra={<Space><Tag color={logKeywordCount > 0 ? 'blue' : 'default'}>{logKeywordCount > 0 ? `已筛选 ${logKeywordCount}` : '未筛选'}</Tag><Button danger disabled={selectedLogIds.length === 0} onClick={() => void deleteSelectedLogs()}>批量删除{selectedLogIds.length > 0 ? ` ${selectedLogIds.length}` : ''}</Button><Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button></Space>}>
-              <Form form={form} component={false}>
-                <Row gutter={[12, 12]} align="middle">
-                  <Col xs={24} md={7}><Form.Item name="keyword" noStyle><Input allowClear placeholder="关键字 / 用户输入" /></Form.Item></Col>
-                  <Col xs={24} md={5}><Form.Item name="tool_name" noStyle><Input allowClear placeholder="工具名" /></Form.Item></Col>
-                  <Col xs={24} md={5}><Form.Item name="device_name" noStyle><Input allowClear placeholder="设备名" /></Form.Item></Col>
-                  <Col xs={24} md={4}><Form.Item name="status" noStyle><Select allowClear placeholder="结果" options={[{ value: 'success', label: '成功' }, { value: 'failure', label: '失败' }]} /></Form.Item></Col>
-                  <Col xs={24} md={3}><Space style={{ width: '100%', display: 'flex' }}><Button type="primary" icon={<SearchOutlined />} onClick={onSearch} loading={loading} style={{ width: '100%' }}>查询</Button><Button onClick={resetFilters} style={{ width: '100%' }}>重置</Button></Space></Col>
-                </Row>
-              </Form>
-              <Alert style={{ marginTop: 16 }} type="info" showIcon message="支持按关键字、工具名、设备名和结果状态筛选。点击“重置”可恢复全部日志。" />
-              <Table style={{ marginTop: 16 }} columns={logColumns} dataSource={logs} rowKey="id" loading={loading} rowSelection={{ selectedRowKeys: selectedLogIds, onChange: setSelectedLogIds }} pagination={{ pageSize: 8, showSizeChanger: true, pageSizeOptions: ['8', '16', '32'] }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
+            <Card title={<Space><FilterOutlined />日志查询与控制审计</Space>} bordered={false} className="section-card" extra={<Button icon={<ReloadOutlined />} onClick={() => void refreshLogs()} loading={loading}>刷新</Button>}>
+              <Tabs
+                defaultActiveKey="control"
+                items={[
+                  {
+                    key: 'control',
+                    label: '控制审计',
+                    children: (
+                      <>
+                        <Space style={{ marginBottom: 12 }}><Tag color={logKeywordCount > 0 ? 'blue' : 'default'}>{logKeywordCount > 0 ? `已筛选 ${logKeywordCount}` : '未筛选'}</Tag><Button danger disabled={selectedLogIds.length === 0} onClick={() => void deleteSelectedLogs()}>批量删除{selectedLogIds.length > 0 ? ` ${selectedLogIds.length}` : ''}</Button></Space>
+                        <Form form={form} component={false}>
+                          <Row gutter={[12, 12]} align="middle">
+                            <Col xs={24} md={7}><Form.Item name="keyword" noStyle><Input allowClear placeholder="关键字 / 用户输入" /></Form.Item></Col>
+                            <Col xs={24} md={5}><Form.Item name="tool_name" noStyle><Input allowClear placeholder="工具名" /></Form.Item></Col>
+                            <Col xs={24} md={5}><Form.Item name="device_name" noStyle><Input allowClear placeholder="设备名" /></Form.Item></Col>
+                            <Col xs={24} md={4}><Form.Item name="status" noStyle><Select allowClear placeholder="结果" options={[{ value: 'success', label: '成功' }, { value: 'failure', label: '失败' }]} /></Form.Item></Col>
+                            <Col xs={24} md={3}><Space style={{ width: '100%', display: 'flex' }}><Button type="primary" icon={<SearchOutlined />} onClick={onSearch} loading={loading} style={{ width: '100%' }}>查询</Button><Button onClick={resetFilters} style={{ width: '100%' }}>重置</Button></Space></Col>
+                          </Row>
+                        </Form>
+                        <Alert style={{ marginTop: 16 }} type="info" showIcon message="支持按关键字、工具名、设备名和结果状态筛选。MCP 入口调用日志已单独放在“ MCP 调用日志”页签。" />
+                        <Table style={{ marginTop: 16 }} columns={logColumns} dataSource={logs} rowKey="id" loading={loading} rowSelection={{ selectedRowKeys: selectedLogIds, onChange: setSelectedLogIds }} pagination={{ pageSize: 8, showSizeChanger: true, pageSizeOptions: ['8', '16', '32'] }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'mcp',
+                    label: `MCP 调用日志${mcpLogs.length > 0 ? ` ${mcpLogs.length}` : ''}`,
+                    children: (
+                      <>
+                        <Space style={{ marginBottom: 12 }}><Tag color="blue">intent=mcp_tool_call</Tag><Button danger disabled={selectedMcpLogIds.length === 0} onClick={() => void deleteSelectedMcpLogs()}>批量删除{selectedMcpLogIds.length > 0 ? ` ${selectedMcpLogIds.length}` : ''}</Button></Space>
+                        <Alert type="info" showIcon message="这里只展示基座/外部客户端对 MCP Tool 的入口调用，例如 resolve_device、list_devices、control_device；内部实际执行日志仍在控制审计里。" />
+                        <Table style={{ marginTop: 16 }} columns={mcpLogColumns} dataSource={mcpLogs} rowKey="id" loading={loading} rowSelection={{ selectedRowKeys: selectedMcpLogIds, onChange: setSelectedMcpLogIds }} pagination={{ pageSize: 8, showSizeChanger: true, pageSizeOptions: ['8', '16', '32'] }} onRow={(record) => ({ onClick: () => { setSelectedLog(record); setDrawerOpen(true); } })} />
+                      </>
+                    ),
+                  },
+                ]}
+              />
             </Card>
           </section>
 
@@ -548,7 +634,7 @@ export const DashboardPage = () => {
         </Space>
 
         <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} width={680} title="日志详情">
-          {selectedLog ? <Descriptions bordered column={1} size="small"><Descriptions.Item label="请求 ID">{selectedLog.request_id}</Descriptions.Item><Descriptions.Item label="时间">{selectedLog.timestamp}</Descriptions.Item><Descriptions.Item label="用户输入">{selectedLog.user_input ?? '-'}</Descriptions.Item><Descriptions.Item label="意图">{selectedLog.intent ?? '-'}</Descriptions.Item><Descriptions.Item label="MCP 工具">{selectedLog.tool_name}</Descriptions.Item><Descriptions.Item label="设备">{selectedLog.resolved_device?.display_name ?? selectedLog.device_name ?? '-'}</Descriptions.Item><Descriptions.Item label="entity_id">{selectedLog.resolved_device?.entity_id ?? '-'}</Descriptions.Item><Descriptions.Item label="结果">{selectedLog.result_status}</Descriptions.Item><Descriptions.Item label="错误码">{selectedLog.error_code ?? '-'}</Descriptions.Item><Descriptions.Item label="耗时(ms)">{selectedLog.duration_ms ?? '-'}</Descriptions.Item></Descriptions> : null}
+          {selectedLog ? <Descriptions bordered column={1} size="small"><Descriptions.Item label="请求 ID">{selectedLog.request_id}</Descriptions.Item><Descriptions.Item label="时间">{selectedLog.timestamp}</Descriptions.Item><Descriptions.Item label="用户输入">{selectedLog.user_input ?? '-'}</Descriptions.Item><Descriptions.Item label="意图">{selectedLog.intent ?? '-'}</Descriptions.Item><Descriptions.Item label="MCP 工具">{selectedLog.tool_name}</Descriptions.Item><Descriptions.Item label="设备">{selectedLog.resolved_device?.display_name ?? selectedLog.device_name ?? '-'}</Descriptions.Item><Descriptions.Item label="entity_id">{selectedLog.resolved_device?.entity_id ?? (selectedLog.tool_args?.entity_id === undefined ? '-' : String(selectedLog.tool_args.entity_id))}</Descriptions.Item><Descriptions.Item label="结果">{selectedLog.result_status}</Descriptions.Item><Descriptions.Item label="错误码">{selectedLog.error_code ?? '-'}</Descriptions.Item><Descriptions.Item label="耗时(ms)">{selectedLog.duration_ms ?? '-'}</Descriptions.Item><Descriptions.Item label="调用参数"><Typography.Paragraph style={{ marginBottom: 0 }}><pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{formatJsonBlock(selectedLog.tool_args)}</pre></Typography.Paragraph></Descriptions.Item><Descriptions.Item label="返回数据"><Typography.Paragraph style={{ marginBottom: 0 }}><pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{formatJsonBlock(getMcpReturnData(selectedLog))}</pre></Typography.Paragraph></Descriptions.Item></Descriptions> : null}
         </Drawer>
       </main>
     </div>

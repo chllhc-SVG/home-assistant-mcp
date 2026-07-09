@@ -66,6 +66,7 @@ const matches = (record: AuditEvent, query: AuditQuery) => {
     if (!haystack.includes(keyword)) return false;
   }
   if (query.tool_name && record.tool_name !== query.tool_name) return false;
+  if (query.intent && record.intent !== query.intent) return false;
   if (query.device_name && record.resolved_device?.display_name !== query.device_name) return false;
   if (query.status && (query.status === 'success' ? !record.result.success : record.result.success)) return false;
   if (!inRange(record.timestamp, query.from, query.to)) return false;

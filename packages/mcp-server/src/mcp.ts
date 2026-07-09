@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Runtime } from './runtime.js';
 import { controlDeviceInputSchema, getDeviceStateInputSchema, listDevicesInputSchema, resolveDeviceInputSchema } from './models/schemas.js';
 import { fail } from './utils/result.js';
@@ -36,6 +37,7 @@ const wrapToolResult = (value: unknown, isError = false) => ({
 const readString = (value: unknown) => (typeof value === 'string' ? value : undefined);
 const readBoolean = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 const resultFrom = (value: unknown) => (value && typeof value === 'object' && 'success' in value ? value : { success: true, data: value, error: null });
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export const mcpTools: McpTool[] = [
   {
@@ -193,9 +195,95 @@ const toJsonRpcResult = (id: JsonRpcId, result: unknown): JsonRpcResponse => ({
 
 const parseParams = (params: unknown) => (params && typeof params === 'object' ? params as Record<string, unknown> : {});
 
-export const dispatchTool = async (runtime: Runtime, name: string, rawParams: unknown) => {
-  const params = parseParams(rawParams);
+const extractToolResultPayload = (toolResult: unknown) => {
+  if (!isRecord(toolResult)) return toolResult;
+  const content = toolResult.content;
+  if (!Array.isArray(content)) return toolResult;
+  const first = content[0];
+  if (!isRecord(first) || typeof first.text !== 'string') return toolResult;
 
+  try {
+    return JSON.parse(first.text) as unknown;
+  } catch {
+    return first.text;
+  }
+};
+
+const summarizeMcpResult = (toolResult: unknown, error?: unknown) => {
+  if (error) {
+    return {
+      success: false,
+      error_code: 'MCP_TOOL_CALL_FAILED',
+    };
+  }
+
+  const isErrorResult = isRecord(toolResult) && toolResult.isError === true;
+  const payload = extractToolResultPayload(toolResult);
+  const payloadRecord = isRecord(payload) ? payload : undefined;
+  const nestedError = isRecord(payloadRecord?.error) ? payloadRecord.error : undefined;
+  const nestedResult = isRecord(payloadRecord?.result) ? payloadRecord.result : undefined;
+  const success =
+    !isErrorResult &&
+    payloadRecord?.success !== false &&
+    nestedResult?.success !== false &&
+    !nestedError;
+
+  const errorCode =
+    readString(payloadRecord?.error_code) ??
+    readString(nestedResult?.error_code) ??
+    readString(nestedError?.error_code) ??
+    (success ? undefined : 'MCP_TOOL_CALL_FAILED');
+
+  return {
+    success,
+    error_code: errorCode,
+    state_after: readString(nestedResult?.state_after) ?? readString(payloadRecord?.state_after),
+    hvac_mode_after: readString(nestedResult?.hvac_mode_after) ?? readString(payloadRecord?.hvac_mode_after),
+    fan_mode_after: readString(nestedResult?.fan_mode_after) ?? readString(payloadRecord?.fan_mode_after),
+    swing_mode_after: readString(nestedResult?.swing_mode_after) ?? readString(payloadRecord?.swing_mode_after),
+  };
+};
+
+const writeMcpCallAudit = async (
+  runtime: Runtime,
+  name: string,
+  params: Record<string, unknown>,
+  startedAt: number,
+  toolResult?: unknown,
+  error?: unknown,
+) => {
+  const requestId = `mcp_${randomUUID()}`;
+  const entityId = readString(params.entity_id);
+  const result = summarizeMcpResult(toolResult, error);
+
+  try {
+    await runtime.auditLogger.write({
+      id: requestId,
+      request_id: requestId,
+      timestamp: new Date().toISOString(),
+      source: 'mcp',
+      tool_name: name,
+      user_input: 'MCP tools/call',
+      intent: 'mcp_tool_call',
+      resolved_device: entityId ? { display_name: entityId, entity_id: entityId } : undefined,
+      tool_args: params,
+      ha_response: {
+        mcp_result: toolResult ? extractToolResultPayload(toolResult) : undefined,
+        error: error instanceof Error ? error.message : error ? String(error) : undefined,
+      },
+      result,
+      duration_ms: Date.now() - startedAt,
+      entity_id: entityId,
+      device_id: entityId,
+      error_code: result.error_code,
+      result_status: result.success ? 'success' : 'failure',
+    });
+  } catch (auditError) {
+    console.error('[mcp-audit] failed to write MCP tool call log', auditError);
+  }
+};
+
+const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<string, unknown>) => {
   if (name === 'resolve_device') {
     const parsed = resolveDeviceInputSchema.parse(params);
     await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
@@ -273,6 +361,20 @@ export const dispatchTool = async (runtime: Runtime, name: string, rawParams: un
   if (name === 'set_climate_swing_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_swing_mode(params)));
 
   return wrapToolResult(fail('INVALID_ARGUMENT', `Unknown tool: ${name}`), true);
+};
+
+export const dispatchTool = async (runtime: Runtime, name: string, rawParams: unknown) => {
+  const startedAt = Date.now();
+  const params = parseParams(rawParams);
+
+  try {
+    const result = await dispatchToolCore(runtime, name, params);
+    await writeMcpCallAudit(runtime, name, params, startedAt, result);
+    return result;
+  } catch (error) {
+    await writeMcpCallAudit(runtime, name, params, startedAt, undefined, error);
+    throw error;
+  }
 };
 
 class StdioJsonRpcTransport {
