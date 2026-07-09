@@ -250,24 +250,6 @@ export class HaClient {
     console.log('[ha-registry] sample devices', deviceRegistry.slice(0, 10));
     console.log('[ha-registry] sample areas', areas.slice(0, 10));
 
-    const entityIds = states
-      .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
-      .map((item) => item.entity_id as string);
-    const extractedTargets = await Promise.all(entityIds.map(async (entityId) => {
-      try {
-        const result = await this.wsRequest<{
-          referenced_entities?: string[];
-          referenced_devices?: string[];
-          referenced_areas?: string[];
-        }>('extract_from_target', { target: { entity_id: [entityId] }, expand_group: true });
-        return [entityId, result] as const;
-      } catch (error) {
-        console.warn('[ha-ws] extract_from_target failed', { entityId, error });
-        return [entityId, undefined] as const;
-      }
-    }));
-    const extractedTargetByEntityId = new Map(extractedTargets);
-
     const areaById = new Map(areas.map((area) => [area.area_id, area]));
     const deviceRegistryById = new Map(deviceRegistry.filter((device): device is HaDeviceInfo & { id: string } => typeof device.id === 'string').map((device) => [device.id, device]));
     const entityRegistryByEntityId = new Map(entityRegistry.filter((entry): entry is HaEntityRegistryEntry & { entity_id: string } => typeof entry.entity_id === 'string').map((entry) => [entry.entity_id, entry]));
@@ -278,11 +260,8 @@ export class HaClient {
         const snapshot = extractEntityCapabilitySnapshot(item);
         const entityId = item.entity_id as string;
         const registryEntry = entityRegistryByEntityId.get(entityId);
-        const extractedTarget = extractedTargetByEntityId.get(entityId);
-        const extractedDeviceId = extractedTarget?.referenced_devices?.[0];
-        const extractedAreaId = extractedTarget?.referenced_areas?.[0];
-        const deviceId = registryEntry?.device_id ?? extractedDeviceId;
-        const areaId = registryEntry?.area_id ?? extractedAreaId;
+        const deviceId = registryEntry?.device_id;
+        const areaId = registryEntry?.area_id;
         const device = deviceId ? deviceRegistryById.get(deviceId) : undefined;
         const base = snapshot ?? {
           entity_id: entityId,

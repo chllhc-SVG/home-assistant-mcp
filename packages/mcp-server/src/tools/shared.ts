@@ -53,7 +53,7 @@ export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve,
 export const waitForExpectedPowerState = async (
   readState: () => Promise<Record<string, unknown>>,
   expected: 'on' | 'off',
-  retries = 4,
+  retries = 1,
   delayMs = 250,
 ) => {
   let lastSummary: StateSummary = { state_after: 'unknown' };
