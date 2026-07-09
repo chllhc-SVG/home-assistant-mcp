@@ -79,7 +79,7 @@ export const mcpTools: McpTool[] = [
   },
   {
     name: 'set_all_lights_state',
-    description: '一键批量控制全屋或指定房间内的所有灯光与灯型开关，适用于“打开所有灯”“关闭所有灯”等指令，避免逐个设备调用。',
+    description: '强制用于批量灯控：当用户明确表示“打开所有灯”“关闭所有灯”“全屋开灯”“房间内关灯”时，必须优先调用此工具；它会一次性控制全屋或指定房间内所有灯光与灯型开关，严禁拆成逐个设备调用。',
     inputSchema: {
       type: 'object',
       properties: {

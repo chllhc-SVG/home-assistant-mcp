@@ -2,14 +2,13 @@ import express, { type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { z } from 'zod';
 import type { Runtime } from './runtime.js';
 import { dispatchTool, mcpTools } from './mcp.js';
 import {
   controlDeviceInputSchema,
-  getDeviceStateInputSchema,
   listClimateDevicesInputSchema,
   listDevicesInputSchema,
-  resolveDeviceInputSchema,
   setClimateFanModeInputSchema,
   setClimateHvacModeInputSchema,
   setClimateSwingModeInputSchema,
@@ -36,13 +35,6 @@ const trace = (event: Omit<TraceEvent, 'id' | 'timestamp'>) => {
 
 const registerTools = (server: McpServer, runtime: Runtime) => {
   server.tool(
-    'resolve_device',
-    'Resolve a natural language device query to matching device candidates. Use this when the user names a device in Chinese or natural language and entity_id is unknown.',
-    resolveDeviceInputSchema.shape,
-    async (input) => dispatchTool(runtime, 'resolve_device', input),
-  );
-
-  server.tool(
     'list_devices',
     'List all controllable Home Assistant devices. Use this to discover entity_id values before controlling lights, switches, climate devices, buttons, numbers, or sensors.',
     listDevicesInputSchema.shape,
@@ -50,17 +42,27 @@ const registerTools = (server: McpServer, runtime: Runtime) => {
   );
 
   server.tool(
-    'get_device_state',
-    'Get the current Home Assistant state of a device by entity_id.',
-    getDeviceStateInputSchema.shape,
-    async (input) => dispatchTool(runtime, 'get_device_state', input),
-  );
-
-  server.tool(
     'control_device',
     'Control a Home Assistant device. For lights and switches use turn_on/turn_off. For climate devices use set_temperature, set_hvac_mode, set_fan_mode, or set_swing_mode.',
     controlDeviceInputSchema.shape,
     async (input) => dispatchTool(runtime, 'control_device', input),
+  );
+
+  server.tool(
+    'set_all_lights_state',
+    '批量控制所有灯光或指定房间内的灯光与灯型开关。',
+    z.object({
+      state: z.enum(['on', 'off']),
+      room: z.string().optional(),
+    }).shape,
+    {
+      title: 'set_all_lights_state',
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async (input) => dispatchTool(runtime, 'set_all_lights_state', input),
   );
 
   server.tool(
