@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Runtime } from './runtime.js';
-import { controlDeviceInputSchema, getDeviceStateInputSchema, listDevicesInputSchema, resolveDeviceInputSchema } from './models/schemas.js';
+import { controlDeviceInputSchema, listDevicesInputSchema } from './models/schemas.js';
 import { fail } from './utils/result.js';
 
 type JsonRpcId = string | number | null;
@@ -41,20 +41,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 
 export const mcpTools: McpTool[] = [
   {
-    name: 'resolve_device',
-    description: '将自然语言设备查询解析为匹配的设备候选项。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string' },
-        domain: { type: 'string' },
-        room: { type: 'string' },
-      },
-      required: ['query'],
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'list_devices',
     description: '列出可控制的设备。',
     inputSchema: {
@@ -65,18 +51,6 @@ export const mcpTools: McpTool[] = [
         keyword: { type: 'string' },
         enabled_only: { type: 'boolean' },
       },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: 'get_device_state',
-    description: '获取设备的当前状态。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entity_id: { type: 'string' },
-      },
-      required: ['entity_id'],
       additionalProperties: false,
     },
   },
@@ -100,6 +74,19 @@ export const mcpTools: McpTool[] = [
         swing_mode: { type: 'string' },
       },
       required: ['entity_id', 'action'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_all_lights_state',
+    description: '一键批量控制全屋或指定房间内的所有灯光与灯型开关，适用于“打开所有灯”“关闭所有灯”等指令，避免逐个设备调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', enum: ['on', 'off'] },
+        room: { type: 'string' },
+      },
+      required: ['state'],
       additionalProperties: false,
     },
   },
@@ -284,43 +271,30 @@ const writeMcpCallAudit = async (
 };
 
 const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<string, unknown>) => {
-  if (name === 'resolve_device') {
-    const parsed = resolveDeviceInputSchema.parse(params);
-    await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
-    const candidates = runtime.registry.resolve(parsed.query, { domain: readString(parsed.domain), room: readString(parsed.room) });
-    return wrapToolResult({
-      matched: candidates.length === 1,
-      confidence: candidates.length === 1 ? 0.98 : candidates.length > 1 ? 0.7 : 0,
-      candidates,
-    });
-  }
-
   if (name === 'list_devices') {
     const parsed = listDevicesInputSchema.parse(params);
     await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
+
+    const domain = readString(parsed.domain);
+    const room = readString(parsed.room);
+    const keyword = readString(parsed.keyword);
+    const enabledOnly = readBoolean(parsed.enabled_only) !== false;
+
+    const baseFilter = { room, keyword, enabledOnly };
+    const devices = domain === 'light' || !domain
+      ? [...runtime.registry.list({ ...baseFilter, domain: 'light' }), ...runtime.registry.list({ ...baseFilter, domain: 'switch' })]
+      : runtime.registry.list({ ...baseFilter, domain });
+
+    const uniqueDevices = devices.reduce<typeof devices>((acc, device) => {
+      if (!acc.some((item) => item.entity_id === device.entity_id)) acc.push(device);
+      return acc;
+    }, []);
+
     return wrapToolResult({
-      devices: runtime.registry.list({
-        domain: readString(parsed.domain),
-        room: readString(parsed.room),
-        keyword: readString(parsed.keyword),
-        enabledOnly: readBoolean(parsed.enabled_only) !== false,
-      }),
+      devices: uniqueDevices,
     });
   }
 
-  if (name === 'get_device_state') {
-    const parsed = getDeviceStateInputSchema.parse(params);
-    const entityId = parsed.entity_id;
-    const domain = entityId.split('.')[0];
-    const tool =
-      domain === 'switch' ? runtime.tools.get_switch_state :
-      domain === 'button' ? runtime.tools.get_button_state :
-      domain === 'number' ? runtime.tools.get_number_state :
-      domain === 'climate' ? runtime.tools.get_climate_state :
-      domain === 'sensor' ? runtime.tools.get_sensor_state :
-      runtime.tools.get_light_state;
-    return wrapToolResult(resultFrom(await tool({ entity_id: entityId })));
-  }
 
   if (name === 'control_device') {
     const parsed = controlDeviceInputSchema.parse(params);
@@ -351,6 +325,46 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
       default:
         return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported action for ${domain}`, { entity_id: entityId, action: parsed.action }), true);
     }
+  }
+
+  if (name === 'set_all_lights_state') {
+    const state = readString(params.state);
+    if (state !== 'on' && state !== 'off') {
+      return wrapToolResult(fail('INVALID_ARGUMENT', 'state must be on or off', { state }), true);
+    }
+
+    const room = readString(params.room);
+    await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
+    const devices = runtime.registry.list({ domain: 'light', room, enabledOnly: true });
+    const switchDevices = runtime.registry.list({ domain: 'switch', room, enabledOnly: true });
+    const targets = [...devices, ...switchDevices];
+    const uniqueTargets = targets.reduce<typeof targets>((acc, device) => {
+      if (!acc.some((item) => item.entity_id === device.entity_id)) acc.push(device);
+      return acc;
+    }, []);
+
+    const results = await Promise.all(uniqueTargets.map(async (device) => {
+      try {
+        if (device.entity_id.startsWith('switch.')) {
+          return state === 'on'
+            ? await runtime.tools.turn_on_switch({ entity_id: device.entity_id })
+            : await runtime.tools.turn_off_switch({ entity_id: device.entity_id });
+        }
+
+        return state === 'on'
+          ? await runtime.tools.turn_on_light({ entity_id: device.entity_id })
+          : await runtime.tools.turn_off_light({ entity_id: device.entity_id });
+      } catch (error) {
+        return fail('SERVICE_FAILED', error instanceof Error ? error.message : String(error), { entity_id: device.entity_id });
+      }
+    }));
+
+    return wrapToolResult(resultFrom({
+      state,
+      room: room ?? null,
+      total: uniqueTargets.length,
+      results,
+    }));
   }
 
   if (name === 'list_climate_devices') return wrapToolResult(resultFrom(await runtime.tools.list_climate_devices(params)));
