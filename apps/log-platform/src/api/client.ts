@@ -163,7 +163,16 @@ export interface ControlResult {
   value?: number;
 }
 
-const baseUrl = import.meta.env.VITE_ADMIN_API_BASE_URL ?? '/api';
+const baseUrl = import.meta.env.VITE_ADMIN_API_BASE_URL ?? '';
+
+const buildApiUrl = (path: string) => {
+  const normalizedBaseUrl = String(baseUrl).replace(/\/+$/, '');
+  if (!normalizedBaseUrl) return path;
+  if (normalizedBaseUrl.endsWith('/api') && path.startsWith('/api/')) {
+    return `${normalizedBaseUrl}${path.slice('/api'.length)}`;
+  }
+  return `${normalizedBaseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+};
 
 const formatApiError = (payload: unknown, fallback: string) => {
   const error = typeof payload === 'object' && payload !== null && 'error' in payload
@@ -182,7 +191,7 @@ const formatApiError = (payload: unknown, fallback: string) => {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   console.log('[api] request', { path, init });
-  const response = await fetch(`${baseUrl}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',
