@@ -60,7 +60,7 @@ services:
       target: build
     command: pnpm --filter @enterprise/log-platform dev --host 0.0.0.0 --port 5175
     environment:
-      VITE_ADMIN_API_BASE_URL: http://127.0.0.1:4000
+      VITE_ADMIN_API_BASE_URL: /api
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
     volumes:

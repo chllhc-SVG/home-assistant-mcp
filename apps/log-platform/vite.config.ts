@@ -6,5 +6,11 @@ export default defineConfig({
   server: {
     port: 5175,
     host: '0.0.0.0',
+    proxy: {
+      '/api': {
+        target: 'http://mcp-server:4000',
+        changeOrigin: true,
+      },
+    },
   },
 });

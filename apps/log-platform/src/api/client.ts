@@ -163,7 +163,7 @@ export interface ControlResult {
   value?: number;
 }
 
-const baseUrl = import.meta.env.VITE_ADMIN_API_BASE_URL ?? 'http://127.0.0.1:4000';
+const baseUrl = import.meta.env.VITE_ADMIN_API_BASE_URL ?? '/api';
 
 const formatApiError = (payload: unknown, fallback: string) => {
   const error = typeof payload === 'object' && payload !== null && 'error' in payload
