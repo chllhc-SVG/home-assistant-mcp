@@ -6,6 +6,7 @@ import type { createTools } from './tools/index.js';
 import type { HaClient } from './services/ha-client.js';
 import { HomeAssistantError } from './services/ha-client.js';
 import { WhitelistStore } from './services/whitelist-store.js';
+import { syncDeviceRegistryFromHomeAssistant } from './services/device-registry-sync.js';
 
 type ToolRegistry = ReturnType<typeof createTools>;
 
@@ -54,6 +55,8 @@ const serializeDevice = (device: LightDevice) => ({
   entity_id: device.entity_id,
   domain: device.domain,
   room: device.room,
+  area_id: device.area_id,
+  area_name: device.area_name,
   type: device.type,
   state: device.state,
   friendly_name: device.friendly_name,
@@ -139,71 +142,30 @@ export const createServer = ({ audit, registry, tools, haClient, whitelistStore,
   });
 
   app.post('/api/admin/logs/batch-delete', async (req, res) => {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id): id is string => typeof id === 'string') : [];
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id: unknown): id is string => typeof id === 'string') : [];
     const deleted = await audit.deleteMany(ids);
     res.json(ok({ deleted }));
   });
 
   app.get('/api/admin/devices', async (_req, res) => {
     try {
-      const records = (await whitelistStore.list()).filter((record) => record.enabled);
-      const enabledEntityIds = records.map((record) => record.entity_id);
-      registry.setExposure(enabledEntityIds);
-
-      const discovered = await haClient.discoverEntities();
-      const discoveredByEntityId = new Map(discovered.map((device) => [device.entity_id, device]));
-
-      for (const record of records) {
-        const snapshot = discoveredByEntityId.get(record.entity_id);
-        const domain = (snapshot?.domain ?? record.domain ?? record.entity_id.split('.')[0]) as LightDevice['domain'];
-        registry.upsert({
-          device_id: snapshot?.device_id ?? record.device_id ?? record.entity_id,
-          display_name: snapshot?.device_name ?? snapshot?.friendly_name ?? record.display_name ?? record.entity_id,
-          aliases: [],
-          entity_id: record.entity_id,
-          domain,
-          room: snapshot?.area_name ?? record.area_name ?? record.room ?? '',
-          area_id: snapshot?.area_id ?? record.area_id,
-          area_name: snapshot?.area_name ?? record.area_name,
-          type: domain,
-          state: snapshot?.state,
-          friendly_name: snapshot?.friendly_name ?? record.friendly_name,
-          supports_brightness: snapshot?.supports_brightness ?? false,
-          supports_value: snapshot?.supports_value,
-          supports_temperature: snapshot?.supports_temperature,
-          supports_hvac_mode: snapshot?.supports_hvac_mode,
-          supports_fan_mode: snapshot?.supports_fan_mode,
-          supports_swing_mode: snapshot?.supports_swing_mode,
-          value_min: snapshot?.value_min,
-          value_max: snapshot?.value_max,
-          value_step: snapshot?.value_step,
-          temperature_min: snapshot?.temperature_min,
-          temperature_max: snapshot?.temperature_max,
-          temperature_step: snapshot?.temperature_step,
-          temperature_unit: snapshot?.temperature_unit,
-          current_temperature: snapshot?.current_temperature,
-          target_temperature: snapshot?.target_temperature,
-          hvac_mode: snapshot?.hvac_mode,
-          hvac_modes: snapshot?.hvac_modes,
-          fan_mode: snapshot?.fan_mode,
-          fan_modes: snapshot?.fan_modes,
-          swing_mode: snapshot?.swing_mode,
-          swing_modes: snapshot?.swing_modes,
-          sensor_unit: snapshot?.sensor_unit,
-          sensor_value: snapshot?.sensor_value,
-          supported_color_modes: snapshot?.supported_color_modes,
-          color_mode: snapshot?.color_mode,
-          brightness: snapshot?.brightness,
-          capabilities: [],
-          risk_level: 'low',
-          enabled: true,
-        });
-      }
-
-      const devices = registry.list({ enabledOnly: true }).filter((device) => enabledEntityIds.includes(device.entity_id));
-      res.json(ok({ devices: devices.map(serializeDevice) }));
+      const records = await whitelistStore.list();
+      const syncedAt = records.reduce<string | undefined>((latest, record) => {
+        if (!record.ha_synced_at) return latest;
+        return !latest || record.ha_synced_at > latest ? record.ha_synced_at : latest;
+      }, undefined);
+      res.json(ok({ synced_at: syncedAt, devices: registry.list({ enabledOnly: true }).map(serializeDevice) }));
     } catch (error) {
       res.status(500).json(failFromError('读取具体设备控制列表失败', error));
+    }
+  });
+
+  app.post('/api/admin/ha/rooms/sync', async (_req, res) => {
+    try {
+      const synced = await syncDeviceRegistryFromHomeAssistant({ registry, haClient, whitelistStore });
+      res.json(ok({ synced_at: synced.synced_at, devices: synced.devices.map(serializeDevice) }));
+    } catch (error) {
+      res.status(error instanceof HomeAssistantError && error.code === 'AUTH_FAILED' ? 401 : 500).json(failFromError('同步 Home Assistant 房间失败', error));
     }
   });
 
@@ -260,7 +222,11 @@ export const createServer = ({ audit, registry, tools, haClient, whitelistStore,
       }
 
       const records = await whitelistStore.list();
-      registry.setExposure(records.filter((record) => record.enabled).map((record) => record.entity_id));
+      if (action === 'delete') {
+        registry.setExposure(records.filter((record) => record.enabled).map((record) => record.entity_id));
+      } else {
+        await syncDeviceRegistryFromHomeAssistant({ registry, haClient, whitelistStore });
+      }
       res.json(ok({ saved: true, devices: records.filter((record) => record.enabled).map((record) => record.entity_id) }));
     } catch (error) {
       res.status(400).json(failFromError('保存设备暴露配置失败', error));

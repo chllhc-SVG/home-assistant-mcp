@@ -46,7 +46,6 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
   };
 
   const getClimateDevice = async (entityId: string) => {
-    await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(entityId);
     if (!device) return { ok: false as const, failure: fail('DEVICE_NOT_FOUND', '未找到空调设备', { entity_id: entityId }) };
     if (device.domain !== 'climate') return { ok: false as const, failure: fail('POLICY_DENIED', '该实体不是空调设备', { entity_id: entityId, domain: device.domain }) };
@@ -56,7 +55,6 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
   return {
     async list_climate_devices(input: unknown) {
       const parsed = listClimateDevicesInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
       return ok({
         devices: registry.list({ room: parsed.room, keyword: parsed.keyword }).filter((device) => device.domain === 'climate'),
       });

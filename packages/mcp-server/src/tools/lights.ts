@@ -7,109 +7,104 @@ import {
   turnOffLightInputSchema,
   turnOnLightInputSchema,
 } from '../models/schemas.js';
-import type { ToolResponse } from '../models/types.js';
+import type { LightDevice, RoomControlProfile, ToolResponse } from '../models/types.js';
 import { fail, ok } from '../utils/result.js';
 import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
-import { buildStateSummary, buildUnavailableError, isEntityUnavailable, makeRequestId, now, waitForExpectedPowerState, writeAudit } from './shared.js';
+import { findMainLightProfile, getLightControlEntityIds, summarizeMainLightProfiles } from '../services/room-control-profiles.js';
+import { buildStateSummary, isEntityUnavailable, makeRequestId, now, wait, waitForExpectedPowerState, writeAudit } from './shared.js';
 
 interface CreateLightToolsDeps {
   registry: LightRegistry;
   policy: PolicyEngine;
   haClient: HaClient;
   auditLogger: AuditLogger;
+  roomControlProfiles: RoomControlProfile[];
 }
 
-const coupledLightGroups: Record<string, string[]> = {
-  'light.aimore_230915_ca16_light': ['light.aimore_230915_6a5d_light'],
-  'light.aimore_230915_6a5d_light': ['light.aimore_230915_ca16_light'],
-};
+type PowerAction = 'on' | 'off';
 
-const TEST_ROOM_MASTER_SWITCH = 'switch.xiaomi_w2_2de4_left_switch_service';
-const groupPrimaryDisplayName = '测试间主灯';
-const groupEntityIds = new Set(['light.aimore_230915_ca16_light', 'light.aimore_230915_6a5d_light']);
+const unique = (values: string[]) => Array.from(new Set(values));
+const stateOf = (state: Record<string, unknown>) => typeof state.state === 'string' ? state.state : 'unknown';
+const toMemberStates = (entityIds: string[], states: Record<string, unknown>[]) =>
+  entityIds.map((entityId, index) => ({ entity_id: entityId, state: stateOf(states[index] ?? {}) }));
 
-const getCoupledEntities = (entityId: string) => [entityId, ...(coupledLightGroups[entityId] ?? [])];
-
-const resolvePrimaryLightEntity = (entityId: string) => {
-  const coupled = getCoupledEntities(entityId).filter((id) => id.startsWith('light.'));
-  return coupled.length > 0 ? coupled[0] : entityId;
-};
-
-const isGroupedTestRoomLight = (entityId: string) => groupEntityIds.has(entityId);
-
-const summarizeGroupedTestRoomLights = (devices: ReturnType<LightRegistry['list']>) => {
-  const grouped = devices.filter((device) => isGroupedTestRoomLight(device.entity_id));
-  const others = devices.filter((device) => !isGroupedTestRoomLight(device.entity_id));
-
-  if (grouped.length === 0) return devices;
-
-  const representative = grouped[0];
-  const aliasSet = new Set(grouped.flatMap((device) => [device.display_name, ...device.aliases]));
-
-  return [
-    {
-      ...representative,
-      display_name: groupPrimaryDisplayName,
-      aliases: Array.from(aliasSet),
-      entity_id: representative.entity_id,
-      supports_brightness: grouped.some((device) => device.supports_brightness),
-      enabled: grouped.some((device) => device.enabled),
-    },
-    ...others,
-  ];
-};
-
-const isSwitchOn = (state: unknown) => state === 'on';
-
-const callEntityService = async (
-  haClient: HaClient,
-  entityId: string,
-  action: 'on' | 'off',
-) => {
-  const isLightEntity = entityId.startsWith('light.');
-  const entityIds = getCoupledEntities(entityId);
-
-  if (action === 'on') {
-    const responses = await Promise.all(entityIds.map((id) => (isLightEntity ? haClient.turnOnLight(id) : haClient.turnOn(id))));
-    const states = await Promise.all(entityIds.map((id) => haClient.getState(id)));
-    return { response: responses, state: states[0] ?? { state: 'unknown' } };
-  }
-
-  const responses = await Promise.all(entityIds.map((id) => (isLightEntity ? haClient.turnOffLight(id) : haClient.turnOff(id))));
-  const states = await Promise.all(entityIds.map((id) => haClient.getState(id)));
-  return { response: responses, state: states[0] ?? { state: 'unknown' } };
-};
-
-export const createLightTools = ({ registry, policy, haClient, auditLogger }: CreateLightToolsDeps) => {
+export const createLightTools = ({ registry, policy, haClient, auditLogger, roomControlProfiles }: CreateLightToolsDeps) => {
   const resolveDevice = (entityId: string) => {
     const device = registry.getByEntityId(entityId);
     const policyCheck = policy.canControlLightDomain(device);
-
-    if (!policyCheck.allowed) {
-      return {
-        ok: false as const,
-        failure: fail(policyCheck.reason, '设备不可控制', { entity_id: entityId }),
-      };
+    if (!policyCheck.allowed || !device) {
+      return { ok: false as const, failure: fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '设备不可控制', { entity_id: entityId }) };
     }
-
-    if (!device) {
-      return {
-        ok: false as const,
-        failure: fail('DEVICE_NOT_FOUND', '设备不可控制', { entity_id: entityId }),
-      };
-    }
-
     return { ok: true as const, device };
   };
 
-  const auditSuccess = async (
+  const resolvePlan = (device: LightDevice) => {
+    const profile = findMainLightProfile(roomControlProfiles, device);
+    return {
+      profile,
+      entityIds: getLightControlEntityIds(roomControlProfiles, device),
+      powerSwitchEntityId: profile?.main_light.power_switch_entity_id,
+    };
+  };
+
+  const validateMembers = (entityIds: string[]) => {
+    for (const entityId of entityIds) {
+      const device = registry.getByEntityId(entityId);
+      const policyCheck = policy.canControlLightDomain(device);
+      if (!policyCheck.allowed || !device) {
+        return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '主灯组中存在不可控制的成员', { entity_id: entityId });
+      }
+    }
+    return undefined;
+  };
+
+  const readMemberStates = (entityIds: string[]) => Promise.all(entityIds.map((entityId) => haClient.getState(entityId)));
+
+  const waitForExpectedMemberStates = async (entityIds: string[], expected: PowerAction, retries = 3, delayMs = 300) => {
+    let states: Record<string, unknown>[] = [];
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      states = await readMemberStates(entityIds);
+      if (states.every((state) => stateOf(state) === expected)) {
+        return { confirmed: true as const, states };
+      }
+      if (attempt < retries) await wait(delayMs);
+    }
+    return { confirmed: false as const, states };
+  };
+
+  const ensurePowerSwitchOn = async (powerSwitchEntityId?: string) => {
+    if (!powerSwitchEntityId) return { stateBefore: undefined };
+
+    const powerSwitch = registry.getByEntityId(powerSwitchEntityId);
+    const policyCheck = policy.canControlSwitch(powerSwitch);
+    if (!policyCheck.allowed || !powerSwitch) {
+      return { failure: fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '主灯供电开关不可控制', { entity_id: powerSwitchEntityId }) };
+    }
+
+    const state = await haClient.getState(powerSwitchEntityId);
+    const stateBefore = stateOf(state);
+    if (isEntityUnavailable(stateBefore)) {
+      return { failure: fail('DEVICE_UNAVAILABLE', '主灯供电开关离线', { entity_id: powerSwitchEntityId }) };
+    }
+    if (stateBefore === 'on') return { stateBefore };
+
+    await haClient.turnOn(powerSwitchEntityId);
+    const confirmed = await waitForExpectedPowerState(() => haClient.getState(powerSwitchEntityId), 'on', 3, 300);
+    if (!confirmed.confirmed) {
+      return { failure: fail('STATE_NOT_CHANGED', '主灯供电开关未能打开', { entity_id: powerSwitchEntityId, state_after: confirmed.summary.state_after }) };
+    }
+    return { stateBefore };
+  };
+
+  const audit = async (
+    success: boolean,
     toolName: string,
-    parsed: Record<string, unknown>,
-    device: NonNullable<ReturnType<LightRegistry['getByEntityId']>>,
-    summary: ReturnType<typeof buildStateSummary>,
+    args: Record<string, unknown>,
+    device: LightDevice,
+    state: Record<string, unknown>,
   ) => {
     const requestId = makeRequestId();
     await writeAudit(auditLogger, {
@@ -118,169 +113,118 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
       timestamp: now(),
       source: 'mcp',
       tool_name: toolName,
-      tool_args: parsed,
+      tool_args: args,
       resolved_device: { display_name: device.display_name, entity_id: device.entity_id },
-      result: { success: true, ...summary },
+      result: success ? { success: true, ...buildStateSummary(state) } : { success: false, error_code: 'STATE_NOT_CHANGED', ...buildStateSummary(state) },
       device_id: device.device_id,
-      entity_id: String(parsed.entity_id),
-      result_status: 'success',
+      entity_id: device.entity_id,
+      result_status: success ? 'success' : 'failure',
+      error_code: success ? undefined : 'STATE_NOT_CHANGED',
     });
   };
 
-  const auditFailure = async (
-    toolName: string,
-    parsed: Record<string, unknown>,
-    device: NonNullable<ReturnType<LightRegistry['getByEntityId']>>,
-    errorCode: string,
-    summary: ReturnType<typeof buildStateSummary>,
-  ) => {
-    const requestId = makeRequestId();
-    await writeAudit(auditLogger, {
-      id: requestId,
-      request_id: requestId,
-      timestamp: now(),
-      source: 'mcp',
-      tool_name: toolName,
-      tool_args: parsed,
-      resolved_device: { display_name: device.display_name, entity_id: device.entity_id },
-      result: { success: false, error_code: errorCode, ...summary },
-      device_id: device.device_id,
-      entity_id: String(parsed.entity_id),
-      result_status: 'failure',
-      error_code: errorCode,
-    });
-  };
-
-  const drivePower = async (entityId: string, desired: 'on' | 'off') => {
+  const drivePower = async (entityId: string, desired: PowerAction) => {
     const resolved = resolveDevice(entityId);
     if (!resolved.ok) return resolved.failure;
 
-    const beforeState = await haClient.getState(entityId);
-    if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
-      const requestId = makeRequestId();
-      await writeAudit(auditLogger, {
-        id: requestId,
-        request_id: requestId,
-        timestamp: now(),
-        source: 'mcp',
-        tool_name: desired === 'on' ? 'turn_on_light' : 'turn_off_light',
-        tool_args: { entity_id: entityId, before_state: 'unavailable' },
-        resolved_device: { display_name: resolved.device.display_name, entity_id: resolved.device.entity_id },
-        result: { success: false, error_code: 'DEVICE_UNAVAILABLE', state_after: 'unavailable' },
-        device_id: resolved.device.device_id,
-        entity_id: entityId,
-        error_code: 'DEVICE_UNAVAILABLE',
-        result_status: 'failure',
-      });
-      return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
-    }
+    const plan = resolvePlan(resolved.device);
+    const invalidMember = validateMembers(plan.entityIds);
+    if (invalidMember) return invalidMember;
 
-    const beforeSummary = buildStateSummary(beforeState);
-    const isLightEntity = entityId.startsWith('light.');
-    const targetState = desired;
-    const initial = await callEntityService(haClient, entityId, desired);
-    const initialSummary = buildStateSummary(initial.state);
+    const beforeStates = await readMemberStates(plan.entityIds);
+    const unavailable = beforeStates.find((state) => isEntityUnavailable(stateOf(state)));
+    if (unavailable) return fail('DEVICE_UNAVAILABLE', '主灯组中存在离线设备', { entity_id: entityId, state: stateOf(unavailable) });
 
-    let latest = await waitForExpectedPowerState(() => haClient.getState(entityId), targetState, 10, 300);
-    let fallbackUsed = false;
+    const powerResult = desired === 'on' ? await ensurePowerSwitchOn(plan.powerSwitchEntityId) : { stateBefore: undefined };
+    if ('failure' in powerResult) return powerResult.failure;
 
-    if (!latest.confirmed && isLightEntity && beforeSummary.state_after !== targetState) {
-      await haClient.turnOffLight(entityId);
-      fallbackUsed = true;
-      latest = await waitForExpectedPowerState(() => haClient.getState(entityId), targetState, 10, 300);
-    }
-
-    const confirmed = latest.confirmed;
-    const latestSummary = latest.summary;
+    const response = await Promise.all(plan.entityIds.map((memberEntityId) =>
+      desired === 'on' ? haClient.turnOnLight(memberEntityId) : haClient.turnOffLight(memberEntityId),
+    ));
+    const confirmed = await waitForExpectedMemberStates(plan.entityIds, desired);
+    const primaryState = confirmed.states[0] ?? { state: 'unknown' };
+    const memberStates = toMemberStates(plan.entityIds, confirmed.states);
     const toolName = desired === 'on' ? 'turn_on_light' : 'turn_off_light';
 
-    if (!confirmed) {
-      await auditFailure(
-        toolName,
-        {
-          entity_id: entityId,
-          before_state: beforeSummary.state_after,
-          call_state: initialSummary.state_after,
-          fallback_used: fallbackUsed,
-        },
-        resolved.device,
-        'STATE_NOT_CHANGED',
-        latestSummary,
-      );
-    } else {
-      await auditSuccess(
-        toolName,
-        {
-          entity_id: entityId,
-          before_state: beforeSummary.state_after,
-          call_state: initialSummary.state_after,
-          fallback_used: fallbackUsed,
-        },
-        resolved.device,
-        latestSummary,
-      );
-    }
+    await audit(confirmed.confirmed, toolName, {
+      entity_id: entityId,
+      member_entity_ids: plan.entityIds,
+      power_switch_entity_id: plan.powerSwitchEntityId,
+      power_switch_state_before: powerResult.stateBefore,
+      member_states_before: toMemberStates(plan.entityIds, beforeStates),
+      member_states_after: memberStates,
+    }, resolved.device, primaryState);
 
     return ok({
       entity_id: entityId,
       action: desired === 'on' ? 'turn_on' : 'turn_off',
-      before_state: beforeSummary.state_after,
-      call_state: initialSummary.state_after,
-      fallback_used: fallbackUsed,
-      ...latestSummary,
-      state_confirmed: confirmed,
-      state_warning: confirmed ? undefined : `实际状态仍为 ${latestSummary.state_after}，但控制请求已发送`,
-      raw: initial.response,
+      grouped_entities: plan.entityIds,
+      power_switch: plan.powerSwitchEntityId,
+      power_switch_state_before: powerResult.stateBefore,
+      member_states: memberStates,
+      ...buildStateSummary(primaryState),
+      state_confirmed: confirmed.confirmed,
+      state_warning: confirmed.confirmed ? undefined : '控制请求已发送，但并非所有主灯成员都已确认到目标状态',
+      raw: response,
     });
   };
 
-  const turnOn = async (entityId: string) => drivePower(entityId, 'on');
+  const setLightLevel = async (entityId: string, brightness?: number, colorTempKelvin?: number) => {
+    const resolved = resolveDevice(entityId);
+    if (!resolved.ok) return resolved.failure;
 
-  const turnOff = async (entityId: string) => drivePower(entityId, 'off');
-
-  const getMasterSwitchState = async (): Promise<Record<string, unknown>> => {
-    try {
-      return await haClient.getState(TEST_ROOM_MASTER_SWITCH);
-    } catch {
-      return { state: 'unknown' };
-    }
-  };
-
-  const ensureMasterSwitchOn = async () => {
-    const switchState = await getMasterSwitchState();
-    if (!isSwitchOn(switchState.state)) {
-      await haClient.turnOn(TEST_ROOM_MASTER_SWITCH);
-    }
-    return switchState.state ?? 'unknown';
-  };
-
-  const setBrightness = async (entityId: string, brightness: number) => {
-    await registry.tryRefreshFromHomeAssistant(haClient);
-    const device = registry.getByEntityId(entityId);
-    const policyCheck = policy.canSetBrightness(device, brightness);
-
-    if (!policyCheck.allowed) {
-      return fail(policyCheck.reason, '亮度控制被拒绝', { entity_id: entityId, brightness });
+    const plan = resolvePlan(resolved.device);
+    const invalidMember = validateMembers(plan.entityIds);
+    if (invalidMember) return invalidMember;
+    for (const memberEntityId of plan.entityIds) {
+      const member = registry.getByEntityId(memberEntityId);
+      const policyCheck = policy.canSetBrightness(member, brightness ?? 0);
+      if (!policyCheck.allowed) {
+        return fail(policyCheck.reason, '主灯组中存在不支持亮度或色温控制的成员', { entity_id: memberEntityId });
+      }
     }
 
-    const normalizedBrightness = Math.max(0, Math.min(255, Math.round(brightness)));
-    const coupledEntities = getCoupledEntities(entityId);
-    const primaryEntityId = resolvePrimaryLightEntity(entityId);
-    const masterSwitchStateBefore = await ensureMasterSwitchOn();
+    const powerResult = await ensurePowerSwitchOn(plan.powerSwitchEntityId);
+    if ('failure' in powerResult) return powerResult.failure;
 
-    const response = await Promise.all(coupledEntities.map((id) => haClient.turnOnLight(id, normalizedBrightness)));
-    const state = await haClient.getState(primaryEntityId);
-    const summary = buildStateSummary(state);
-    await auditSuccess('set_light_brightness', { entity_id: entityId, brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore }, device!, summary);
-    return ok({ entity_id: entityId, action: 'set_brightness', brightness: normalizedBrightness, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore, ...summary, raw: response });
+    const response = await Promise.all(plan.entityIds.map((memberEntityId) =>
+      haClient.turnOnLight(memberEntityId, brightness, colorTempKelvin),
+    ));
+    const confirmed = await waitForExpectedMemberStates(plan.entityIds, 'on');
+    const primaryState = confirmed.states[0] ?? { state: 'unknown' };
+    const memberStates = toMemberStates(plan.entityIds, confirmed.states);
+    const action = brightness === undefined ? 'set_color_temp' : 'set_brightness';
+
+    await audit(confirmed.confirmed, action === 'set_brightness' ? 'set_light_brightness' : 'set_light_state', {
+      entity_id: entityId,
+      member_entity_ids: plan.entityIds,
+      power_switch_entity_id: plan.powerSwitchEntityId,
+      power_switch_state_before: powerResult.stateBefore,
+      ...(brightness === undefined ? { color_temp_kelvin: colorTempKelvin } : { brightness }),
+      member_states_after: memberStates,
+    }, resolved.device, primaryState);
+
+    return ok({
+      entity_id: entityId,
+      action,
+      ...(brightness === undefined ? { color_temp_kelvin: colorTempKelvin } : { brightness }),
+      grouped_entities: plan.entityIds,
+      power_switch: plan.powerSwitchEntityId,
+      power_switch_state_before: powerResult.stateBefore,
+      member_states: memberStates,
+      ...buildStateSummary(primaryState),
+      state_confirmed: confirmed.confirmed,
+      raw: response,
+    });
   };
+
+  const summarizeLights = (devices: LightDevice[]) => summarizeMainLightProfiles(roomControlProfiles, devices);
 
   return {
-    async list_lights(input: unknown): Promise<ToolResponse<{ devices: ReturnType<LightRegistry['list']> }>> {
+    async list_lights(input: unknown): Promise<ToolResponse<{ devices: LightDevice[] }>> {
       const parsed = listLightsInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
       return ok({
-        devices: summarizeGroupedTestRoomLights(registry.list({
+        devices: summarizeLights(registry.list({
           room: parsed.room,
           keyword: parsed.keyword,
           supportBrightness: parsed.support_brightness,
@@ -290,8 +234,17 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
 
     async resolve_light(input: unknown) {
       const parsed = resolveLightInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
-      const candidates = summarizeGroupedTestRoomLights(registry.resolve(parsed.query));
+      const matchedByName = roomControlProfiles.flatMap((profile) => {
+        const names = [profile.main_light.display_name, ...(profile.main_light.aliases ?? [])];
+        if (!names.some((name) => name.includes(parsed.query))) return [];
+        return profile.main_light.member_entity_ids
+          .map((entityId) => registry.getByEntityId(entityId))
+          .filter((device): device is LightDevice => Boolean(device));
+      });
+      const candidates = summarizeLights([
+        ...registry.resolve(parsed.query),
+        ...matchedByName.filter((device, index, devices) => devices.findIndex((item) => item.entity_id === device.entity_id) === index),
+      ]);
       return ok({
         matched: candidates.length > 0,
         confidence: candidates.length === 1 ? 0.98 : candidates.length > 1 ? 0.7 : 0,
@@ -301,80 +254,55 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger }: Cr
 
     async get_light_state(input: unknown) {
       const parsed = getLightStateInputSchema.parse(input);
-      const device = registry.getByEntityId(parsed.entity_id);
-      const policyCheck = policy.canControlLightDomain(device);
+      const resolved = resolveDevice(parsed.entity_id);
+      if (!resolved.ok) return resolved.failure;
 
-      if (!policyCheck.allowed) {
-        return fail(policyCheck.reason, '未找到或不可用的设备', { entity_id: parsed.entity_id });
-      }
-
-      if (isGroupedTestRoomLight(parsed.entity_id)) {
-        const switchState = await haClient.getState(TEST_ROOM_MASTER_SWITCH).catch(() => undefined);
-        if (!isSwitchOn(switchState?.state)) {
+      const plan = resolvePlan(resolved.device);
+      if (plan.powerSwitchEntityId) {
+        const switchState = await haClient.getState(plan.powerSwitchEntityId).catch(() => undefined);
+        if (stateOf(switchState ?? {}) !== 'on') {
           return ok({
             entity_id: parsed.entity_id,
             state: 'off',
-            friendly_name: groupPrimaryDisplayName,
-            master_switch: TEST_ROOM_MASTER_SWITCH,
-            master_switch_state: switchState?.state ?? 'unknown',
-            grouped_entities: getCoupledEntities(parsed.entity_id),
+            friendly_name: plan.profile?.main_light.display_name ?? resolved.device.display_name,
+            power_switch: plan.powerSwitchEntityId,
+            power_switch_state: stateOf(switchState ?? {}),
+            grouped_entities: plan.entityIds,
           });
         }
       }
 
-      const state = await haClient.getState(parsed.entity_id);
-      if (isEntityUnavailable(typeof state.state === 'string' ? state.state : undefined)) {
-        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
-      }
-      return ok(state);
+      const states = await readMemberStates(plan.entityIds);
+      const unavailable = states.find((state) => isEntityUnavailable(stateOf(state)));
+      if (unavailable) return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: stateOf(unavailable) });
+      return ok({
+        ...(states[0] ?? { state: 'unknown' }),
+        grouped_entities: plan.entityIds,
+        member_states: toMemberStates(plan.entityIds, states),
+      });
     },
 
     async turn_on_light(input: unknown) {
       const parsed = turnOnLightInputSchema.parse(input);
-      return turnOn(parsed.entity_id);
+      return drivePower(parsed.entity_id, 'on');
     },
 
     async turn_off_light(input: unknown) {
       const parsed = turnOffLightInputSchema.parse(input);
-      return turnOff(parsed.entity_id);
+      return drivePower(parsed.entity_id, 'off');
     },
 
     async set_light_brightness(input: unknown) {
       const parsed = setLightBrightnessInputSchema.parse(input);
-      return setBrightness(parsed.entity_id, parsed.brightness);
+      return setLightLevel(parsed.entity_id, Math.max(0, Math.min(255, Math.round(parsed.brightness))));
     },
 
     async set_light_state(input: unknown) {
       const parsed = setLightStateInputSchema.parse(input);
-
-      if (parsed.state === 'off') {
-        return turnOff(parsed.entity_id);
-      }
-
-      if (parsed.brightness !== undefined) {
-        return setBrightness(parsed.entity_id, parsed.brightness);
-      }
-
-      if (parsed.color_temp_kelvin !== undefined) {
-        await registry.tryRefreshFromHomeAssistant(haClient);
-        const device = registry.getByEntityId(parsed.entity_id);
-        const policyCheck = policy.canSetBrightness(device, 0);
-
-        if (!policyCheck.allowed) {
-          return fail(policyCheck.reason, '色温控制被拒绝', { entity_id: parsed.entity_id, color_temp_kelvin: parsed.color_temp_kelvin });
-        }
-
-        const coupledEntities = getCoupledEntities(parsed.entity_id);
-        const primaryEntityId = resolvePrimaryLightEntity(parsed.entity_id);
-        const masterSwitchStateBefore = await ensureMasterSwitchOn();
-        const response = await Promise.all(coupledEntities.map((id) => haClient.turnOnLight(id, undefined, parsed.color_temp_kelvin)));
-        const state = await haClient.getState(primaryEntityId);
-        const summary = buildStateSummary(state);
-        await auditSuccess('set_light_state', { entity_id: parsed.entity_id, color_temp_kelvin: parsed.color_temp_kelvin, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore }, device!, summary);
-        return ok({ entity_id: parsed.entity_id, action: 'set_color_temp', color_temp_kelvin: parsed.color_temp_kelvin, coupled_entities: coupledEntities, master_switch: TEST_ROOM_MASTER_SWITCH, master_switch_state_before: masterSwitchStateBefore, ...summary, raw: response });
-      }
-
-      return turnOn(parsed.entity_id);
+      if (parsed.state === 'off') return drivePower(parsed.entity_id, 'off');
+      if (parsed.brightness !== undefined) return setLightLevel(parsed.entity_id, parsed.brightness);
+      if (parsed.color_temp_kelvin !== undefined) return setLightLevel(parsed.entity_id, undefined, parsed.color_temp_kelvin);
+      return drivePower(parsed.entity_id, 'on');
     },
   };
 };

@@ -103,14 +103,12 @@ export class HaClient {
     return this.request<HaAreaInfo[]>('/api/areas', { method: 'GET' });
   }
 
-  private async wsRequest<T>(type: string, payload: Record<string, unknown> = {}): Promise<T> {
+  private async wsBatchRequest(commands: Array<{ id: number; type: string; payload?: Record<string, unknown> }>) {
     if (!this.token) {
       throw new HomeAssistantError('AUTH_FAILED', 'Home Assistant token is empty. 请设置 HOME_ASSISTANT_TOKEN 或 HA_TOKEN。');
     }
 
     const ws = new WebSocket(this.getWebSocketUrl());
-    const timeoutMs = this.timeoutMs;
-    const command = { id: 1, type, ...payload };
     const readMessageText = async (data: RawData) => {
       if (typeof data === 'string') return data;
       if (data instanceof ArrayBuffer) return new TextDecoder().decode(data);
@@ -119,10 +117,11 @@ export class HaClient {
       return String(data);
     };
 
-    console.log('[ha-ws] connect', { command, url: this.getWebSocketUrl() });
+    console.log('[ha-ws] connect', { commands: commands.map((command) => command.type), url: this.getWebSocketUrl() });
 
-    return await new Promise<T>((resolve, reject) => {
+    return await new Promise<Map<number, WsResultMessage<unknown>>>((resolve, reject) => {
       let settled = false;
+      const results = new Map<number, WsResultMessage<unknown>>();
       const settle = (callback: () => void) => {
         if (settled) return;
         settled = true;
@@ -130,20 +129,19 @@ export class HaClient {
         callback();
       };
       const timeout = setTimeout(() => {
-        console.log('[ha-ws] timeout', { command, timeoutMs });
+        console.log('[ha-ws] timeout', { commands: commands.map((command) => command.type), timeoutMs: this.timeoutMs });
         ws.close();
-        settle(() => reject(new HomeAssistantError('TIMEOUT', `Home Assistant websocket request timed out after ${timeoutMs}ms`)));
-      }, timeoutMs);
+        settle(() => reject(new HomeAssistantError('TIMEOUT', `Home Assistant websocket request timed out after ${this.timeoutMs}ms`)));
+      }, this.timeoutMs);
 
       ws.addEventListener('error', () => {
-        console.log('[ha-ws] error', { command });
+        console.log('[ha-ws] error', { commands: commands.map((command) => command.type) });
         settle(() => reject(new HomeAssistantError('SERVICE_FAILED', 'Home Assistant websocket connection failed')));
       });
 
       ws.addEventListener('message', async (event: { data: RawData }) => {
         try {
           const text = await readMessageText(event.data);
-          console.log('[ha-ws] raw full', { command, text });
           const msg = JSON.parse(text) as Record<string, unknown>;
           if (msg.type === 'auth_required') {
             ws.send(JSON.stringify({ type: 'auth', access_token: this.token }));
@@ -151,29 +149,30 @@ export class HaClient {
           }
           if (msg.type === 'auth_invalid') {
             ws.close();
-            console.log('[ha-ws] auth_invalid', { command, msg });
+            console.log('[ha-ws] auth_invalid', { message: msg.message });
             settle(() => reject(new HomeAssistantError('AUTH_FAILED', typeof msg.message === 'string' ? msg.message : 'Home Assistant websocket auth failed')));
             return;
           }
           if (msg.type === 'auth_ok') {
-            console.log('[ha-ws] auth_ok', { command });
-            ws.send(JSON.stringify(command));
+            console.log('[ha-ws] auth_ok', { commands: commands.map((command) => command.type) });
+            for (const command of commands) {
+              ws.send(JSON.stringify({ id: command.id, type: command.type, ...(command.payload ?? {}) }));
+            }
             return;
           }
           if (msg.type === 'result') {
-            ws.close();
-            const result = msg as WsResultMessage<T>;
-            console.log('[ha-ws] result raw', { command, message: msg });
-          console.log('[ha-ws] result full', { command, success: result.success, result: result.result, error: result.error });
-            if (!result.success) {
-              settle(() => reject(new HomeAssistantError('SERVICE_FAILED', result.error?.message ?? 'Home Assistant websocket request failed')));
-              return;
+            const result = msg as WsResultMessage<unknown>;
+            if (!commands.some((command) => command.id === result.id)) return;
+            results.set(result.id, result);
+            console.log('[ha-ws] result', { id: result.id, success: result.success, error: result.error?.message });
+            if (results.size === commands.length) {
+              ws.close();
+              settle(() => resolve(results));
             }
-            settle(() => resolve(result.result as T));
           }
         } catch (error) {
           ws.close();
-          console.log('[ha-ws] parse failed', { command, error });
+          console.log('[ha-ws] parse failed', { error });
           settle(() => reject(new HomeAssistantError('SERVICE_FAILED', error instanceof Error ? error.message : String(error))));
         }
       });
@@ -203,33 +202,28 @@ export class HaClient {
       name: toStringValue(area.name) ?? '',
     });
 
-    const [states, displayEntityRegistry, fullEntityRegistry, deviceRegistry, areas] = await Promise.all([
+    const [states, wsResults] = await Promise.all([
       this.listStates(),
-      this.wsRequest<{ entities: Array<Record<string, unknown>>; entity_categories?: Record<string, string> }>('config/entity_registry/list_for_display')
-        .then((payload) => payload.entities.map(normalizeEntityEntry).filter((entry) => entry.entity_id))
-        .catch((error) => {
-          console.error('[ha-ws] config/entity_registry/list_for_display failed', error);
-          return [];
-        }),
-      this.wsRequest<Array<Record<string, unknown>>>('config/entity_registry/list')
-        .then((payload) => payload.map(normalizeEntityEntry).filter((entry) => entry.entity_id))
-        .catch((error) => {
-          console.error('[ha-ws] config/entity_registry/list failed', error);
-          return [];
-        }),
-      this.wsRequest<Array<Record<string, unknown>>>('config/device_registry/list')
-        .then((payload) => payload.map(normalizeDeviceEntry))
-        .catch((error) => {
-          console.error('[ha-ws] config/device_registry/list failed', error);
-          return [];
-        }),
-      this.wsRequest<Array<Record<string, unknown>>>('config/area_registry/list')
-        .then((payload) => payload.map(normalizeAreaEntry).filter((area) => area.area_id))
-        .catch((error) => {
-          console.error('[ha-ws] config/area_registry/list failed', error);
-          return [];
-        }),
+      this.wsBatchRequest([
+        { id: 1, type: 'config/entity_registry/list_for_display' },
+        { id: 2, type: 'config/entity_registry/list' },
+        { id: 3, type: 'config/device_registry/list' },
+        { id: 4, type: 'config/area_registry/list' },
+      ]),
     ]);
+    const resultFor = <T>(id: number): T | undefined => {
+      const result = wsResults.get(id);
+      if (!result?.success) {
+        console.error('[ha-ws] registry request failed', { id, error: result?.error?.message });
+        return undefined;
+      }
+      return result.result as T | undefined;
+    };
+    const displayPayload = resultFor<{ entities: Array<Record<string, unknown>> }>(1);
+    const displayEntityRegistry = displayPayload?.entities.map(normalizeEntityEntry).filter((entry) => entry.entity_id) ?? [];
+    const fullEntityRegistry = (resultFor<Array<Record<string, unknown>>>(2) ?? []).map(normalizeEntityEntry).filter((entry) => entry.entity_id);
+    const deviceRegistry = (resultFor<Array<Record<string, unknown>>>(3) ?? []).map(normalizeDeviceEntry);
+    const areas = (resultFor<Array<Record<string, unknown>>>(4) ?? []).map(normalizeAreaEntry).filter((area) => area.area_id);
     const entityRegistry = [...displayEntityRegistry, ...fullEntityRegistry].reduce<HaEntityRegistryEntry[]>((entries, entry) => {
       const existingIndex = entries.findIndex((item) => item.entity_id === entry.entity_id);
       if (existingIndex === -1) return [...entries, entry];
@@ -246,9 +240,6 @@ export class HaClient {
       deviceRegistry: deviceRegistry.length,
       areas: areas.length,
     });
-    console.log('[ha-registry] sample entities', entityRegistry.slice(0, 10));
-    console.log('[ha-registry] sample devices', deviceRegistry.slice(0, 10));
-    console.log('[ha-registry] sample areas', areas.slice(0, 10));
 
     const areaById = new Map(areas.map((area) => [area.area_id, area]));
     const deviceRegistryById = new Map(deviceRegistry.filter((device): device is HaDeviceInfo & { id: string } => typeof device.id === 'string').map((device) => [device.id, device]));

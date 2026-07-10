@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Runtime } from './runtime.js';
 import { controlDeviceInputSchema, listDevicesInputSchema } from './models/schemas.js';
 import { fail } from './utils/result.js';
+import { getLightControlKey } from './services/room-control-profiles.js';
 
 type JsonRpcId = string | number | null;
 
@@ -273,7 +274,6 @@ const writeMcpCallAudit = async (
 const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<string, unknown>) => {
   if (name === 'list_devices') {
     const parsed = listDevicesInputSchema.parse(params);
-    await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
 
     const domain = readString(parsed.domain);
     const room = readString(parsed.room);
@@ -334,12 +334,19 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
     }
 
     const room = readString(params.room);
-    await runtime.registry.tryRefreshFromHomeAssistant(runtime.haClient);
     const devices = runtime.registry.list({ domain: 'light', room, enabledOnly: true });
     const switchDevices = runtime.registry.list({ domain: 'switch', room, enabledOnly: true });
     const targets = [...devices, ...switchDevices];
     const uniqueTargets = targets.reduce<typeof targets>((acc, device) => {
-      if (!acc.some((item) => item.entity_id === device.entity_id)) acc.push(device);
+      const targetKey = device.domain === 'light'
+        ? getLightControlKey(runtime.config.roomControlProfiles, device)
+        : `switch:${device.entity_id}`;
+      if (!acc.some((item) => {
+        const itemKey = item.domain === 'light'
+          ? getLightControlKey(runtime.config.roomControlProfiles, item)
+          : `switch:${item.entity_id}`;
+        return itemKey === targetKey;
+      })) acc.push(device);
       return acc;
     }, []);
 

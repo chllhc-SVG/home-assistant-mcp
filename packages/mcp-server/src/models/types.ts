@@ -23,6 +23,8 @@ export interface ControllableDevice {
   entity_id: string;
   domain: DeviceDomain;
   room: string;
+  area_id?: string;
+  area_name?: string;
   type: DeviceDomain;
   enabled: boolean;
   supports_brightness: boolean;
@@ -62,6 +64,16 @@ export interface ControllableDevice {
 }
 
 export type LightDevice = ControllableDevice;
+
+export interface RoomControlProfile {
+  area_id: string;
+  main_light: {
+    display_name: string;
+    aliases?: string[];
+    member_entity_ids: string[];
+    power_switch_entity_id?: string;
+  };
+}
 
 export interface HaDeviceInfo {
   id?: string;
@@ -108,6 +120,8 @@ export interface HaEntityCapabilitySnapshot {
   supports_swing_mode: boolean;
   supported_color_modes: string[];
   color_mode?: string;
+  color_temp_min_kelvin?: number;
+  color_temp_max_kelvin?: number;
   brightness?: number;
   value_min?: number;
   value_max?: number;

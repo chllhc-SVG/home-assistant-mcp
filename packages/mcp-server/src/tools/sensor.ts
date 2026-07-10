@@ -13,7 +13,6 @@ interface CreateSensorToolsDeps {
 export const createSensorTools = ({ registry, policy, haClient }: CreateSensorToolsDeps) => ({
   async get_sensor_state(input: unknown) {
     const parsed = getDeviceStateInputSchema.parse(input);
-    await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(parsed.entity_id);
     const policyCheck = policy.canReadSensor(device);
     if (!policyCheck.allowed) return fail(policyCheck.reason, '传感器不可用或不允许查询', { entity_id: parsed.entity_id });

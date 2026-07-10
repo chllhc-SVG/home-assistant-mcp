@@ -1,0 +1,16 @@
+{
+  "profiles": [
+    {
+      "area_id": "5f_lounge",
+      "main_light": {
+        "display_name": "测试间主灯",
+        "aliases": ["测试间主灯", "测试间两个主灯", "主灯"],
+        "member_entity_ids": [
+          "light.aimore_230915_ca16_light",
+          "light.aimore_230915_6a5d_light"
+        ],
+        "power_switch_entity_id": "switch.xiaomi_w2_2de4_left_switch_service"
+      }
+    }
+  ]
+}

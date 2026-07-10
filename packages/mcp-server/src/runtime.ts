@@ -7,6 +7,7 @@ import { LightRegistry } from './services/light-registry.js';
 import { PolicyEngine } from './services/policy-engine.js';
 import { createTools } from './tools/index.js';
 import { WhitelistStore } from './services/whitelist-store.js';
+import { hydrateRegistryFromWhitelist } from './services/device-registry-sync.js';
 
 const seedToolByDomain: Record<LightDevice['domain'], string> = {
   light: 'get_light_state',
@@ -55,10 +56,10 @@ export const createRuntime = async (): Promise<Runtime> => {
   const policy = new PolicyEngine();
   const haClient = new HaClient(config.homeAssistantBaseUrl, config.homeAssistantToken, config.timeoutMs);
   const auditLogger = new AuditLogger(auditStore);
-  const tools = createTools({ registry, policy, haClient, auditLogger });
+  const tools = createTools({ registry, policy, haClient, auditLogger, roomControlProfiles: config.roomControlProfiles });
 
   const records = await whitelistStore.list();
-  registry.setExposure(records.filter((record) => record.enabled).map((record) => record.entity_id));
+  hydrateRegistryFromWhitelist(registry, records);
 
   return {
     config,

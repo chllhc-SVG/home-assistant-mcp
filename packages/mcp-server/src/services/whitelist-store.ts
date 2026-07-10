@@ -12,6 +12,7 @@ export interface WhitelistRecord {
   area_id?: string;
   area_name?: string;
   enabled: boolean;
+  ha_synced_at?: string;
   updated_at: string;
   created_at: string;
 }
@@ -45,13 +46,14 @@ export class WhitelistStore {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    await this.pool.query('ALTER TABLE whitelist_devices ADD COLUMN IF NOT EXISTS ha_synced_at TIMESTAMPTZ');
     this.initialized = true;
   }
 
   async list(): Promise<WhitelistRecord[]> {
     await this.initialize();
     const result = await this.pool.query<WhitelistRecord>(`
-      SELECT entity_id, display_name, friendly_name, device_id, device_name, domain, room, area_id, area_name, enabled, created_at::text, updated_at::text
+      SELECT entity_id, display_name, friendly_name, device_id, device_name, domain, room, area_id, area_name, enabled, ha_synced_at::text, created_at::text, updated_at::text
       FROM whitelist_devices
       ORDER BY updated_at DESC, entity_id ASC
     `);
@@ -65,8 +67,8 @@ export class WhitelistStore {
       await client.query('BEGIN');
       for (const record of records) {
         await client.query(
-          `INSERT INTO whitelist_devices (entity_id, display_name, friendly_name, device_id, device_name, domain, room, area_id, area_name, enabled, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+          `INSERT INTO whitelist_devices (entity_id, display_name, friendly_name, device_id, device_name, domain, room, area_id, area_name, enabled, ha_synced_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
            ON CONFLICT (entity_id) DO UPDATE SET
              display_name = EXCLUDED.display_name,
              friendly_name = EXCLUDED.friendly_name,
@@ -77,6 +79,7 @@ export class WhitelistStore {
              area_id = EXCLUDED.area_id,
              area_name = EXCLUDED.area_name,
              enabled = EXCLUDED.enabled,
+             ha_synced_at = EXCLUDED.ha_synced_at,
              updated_at = NOW()`,
           [
             record.entity_id,
@@ -89,6 +92,7 @@ export class WhitelistStore {
             record.area_id ?? null,
             record.area_name ?? null,
             record.enabled,
+            record.ha_synced_at ?? null,
           ],
         );
       }

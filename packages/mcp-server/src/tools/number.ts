@@ -15,7 +15,6 @@ interface CreateNumberToolsDeps {
 
 export const createNumberTools = ({ registry, policy, haClient, auditLogger }: CreateNumberToolsDeps) => {
   const setValue = async (entityId: string, value: number) => {
-    await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(entityId);
     const policyCheck = policy.canSetValue(device, value);
     if (!policyCheck.allowed) return fail(policyCheck.reason, '数值实体不可设置或超出范围', { entity_id: entityId, value });
@@ -53,7 +52,6 @@ export const createNumberTools = ({ registry, policy, haClient, auditLogger }: C
 
     async get_number_state(input: unknown) {
       const parsed = getDeviceStateInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
       const device = registry.getByEntityId(parsed.entity_id);
       const policyCheck = policy.canReadNumber(device);
       if (!policyCheck.allowed) {

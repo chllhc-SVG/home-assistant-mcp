@@ -2,6 +2,7 @@ import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
 import type { LightRegistry } from '../services/light-registry.js';
 import type { PolicyEngine } from '../services/policy-engine.js';
+import type { RoomControlProfile } from '../models/types.js';
 import { createButtonTools } from './button.js';
 import { createClimateTools } from './climate.js';
 import { createLightTools } from './lights.js';
@@ -14,10 +15,11 @@ interface CreateToolsDeps {
   policy: PolicyEngine;
   haClient: HaClient;
   auditLogger: AuditLogger;
+  roomControlProfiles: RoomControlProfile[];
 }
 
-export const createTools = ({ registry, policy, haClient, auditLogger }: CreateToolsDeps) => ({
-  ...createLightTools({ registry, policy, haClient, auditLogger }),
+export const createTools = ({ registry, policy, haClient, auditLogger, roomControlProfiles }: CreateToolsDeps) => ({
+  ...createLightTools({ registry, policy, haClient, auditLogger, roomControlProfiles }),
   ...createSwitchTools({ registry, policy, haClient, auditLogger }),
   ...createButtonTools({ registry, policy, haClient, auditLogger }),
   ...createNumberTools({ registry, policy, haClient, auditLogger }),

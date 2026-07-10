@@ -15,7 +15,6 @@ interface CreateSwitchToolsDeps {
 
 export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: CreateSwitchToolsDeps) => {
   const control = async (toolName: 'turn_on_switch' | 'turn_off_switch', entityId: string) => {
-    await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(entityId);
     const policyCheck = policy.canControlSwitch(device);
     if (!policyCheck.allowed || !device) return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '开关不可用或不允许操作', { entity_id: entityId });
@@ -73,7 +72,6 @@ export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: C
 
     async get_switch_state(input: unknown) {
       const parsed = getDeviceStateInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
       const device = registry.getByEntityId(parsed.entity_id);
       const policyCheck = policy.canControlSwitch(device);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '开关不可用或不允许查询', { entity_id: parsed.entity_id });

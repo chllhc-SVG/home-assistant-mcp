@@ -15,7 +15,6 @@ interface CreateButtonToolsDeps {
 
 export const createButtonTools = ({ registry, policy, haClient, auditLogger }: CreateButtonToolsDeps) => {
   const press = async (entityId: string) => {
-    await registry.tryRefreshFromHomeAssistant(haClient);
     const device = registry.getByEntityId(entityId);
     const policyCheck = policy.canPressButton(device);
     if (!policyCheck.allowed) return fail(policyCheck.reason, '按钮不可用或不允许操作', { entity_id: entityId });
@@ -53,7 +52,6 @@ export const createButtonTools = ({ registry, policy, haClient, auditLogger }: C
 
     async get_button_state(input: unknown) {
       const parsed = getDeviceStateInputSchema.parse(input);
-      await registry.tryRefreshFromHomeAssistant(haClient);
       const device = registry.getByEntityId(parsed.entity_id);
       const policyCheck = policy.canPressButton(device);
       if (!policyCheck.allowed) return fail(policyCheck.reason, '按钮不可用或不允许查询', { entity_id: parsed.entity_id });

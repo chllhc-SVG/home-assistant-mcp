@@ -31,6 +31,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/home_assistant_mcp
       HOME_ASSISTANT_TIMEOUT_MS: ${HOME_ASSISTANT_TIMEOUT_MS:-15000}
       LIGHTS_CONFIG_PATH: /app/config/lights.json
+      ROOM_CONTROL_PROFILES_PATH: /app/config/room-control-profiles.json
       MCP_HTTP_PORT: 4010
       ADMIN_WEB_PORT: 4000
       NODE_ENV: production

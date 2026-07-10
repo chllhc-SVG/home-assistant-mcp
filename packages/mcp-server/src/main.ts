@@ -4,10 +4,28 @@ import { createServer as createHttpServer } from './server.js';
 import { createRuntime } from './runtime.js';
 import { startMcp } from './mcp.js';
 import { createMcpHttpRouter } from './mcp-http.js';
+import { syncDeviceRegistryFromHomeAssistant } from './services/device-registry-sync.js';
 
 const boot = async () => {
   const runtime = await createRuntime();
   await auditStore.seed(runtime.seedEvents);
+
+  let syncInFlight = false;
+  const syncHaRegistry = async () => {
+    if (syncInFlight) return;
+    syncInFlight = true;
+    try {
+      const result = await syncDeviceRegistryFromHomeAssistant(runtime);
+      console.log(`ha device registry synced at ${result.synced_at}`);
+    } catch (error) {
+      console.error('ha device registry sync failed; using the last local snapshot', error);
+    } finally {
+      syncInFlight = false;
+    }
+  };
+  void syncHaRegistry();
+  const syncTimer = setInterval(() => void syncHaRegistry(), runtime.config.haRegistrySyncIntervalMs);
+  syncTimer.unref();
 
   const mcpMode = process.env.MCP_MODE ?? 'http';
 
