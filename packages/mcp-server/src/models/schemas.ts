@@ -93,7 +93,7 @@ export const listClimateDevicesInputSchema = z.object({
 });
 
 export const setClimateTemperatureInputSchema = z.object({
-  entity_id: z.string().min(1).default('climate.lmkj_wsd001_c5aa_air_conditioner'),
+  entity_id: z.string().min(1),
   temperature: z.number(),
 });
 

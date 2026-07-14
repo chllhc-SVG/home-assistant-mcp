@@ -130,7 +130,7 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
 
     async set_climate_temperature(input: unknown) {
       const parsed = setClimateTemperatureInputSchema.parse(input);
-      const entityId = parsed.entity_id || 'climate.lmkj_wsd001_c5aa_air_conditioner';
+      const entityId = parsed.entity_id;
       const resolved = await getClimateDevice(entityId);
       if (!resolved.ok) return resolved.failure;
 
