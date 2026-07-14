@@ -47,7 +47,16 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
 
   const getClimateDevice = async (entityId: string) => {
     const registryDevice = registry.getByEntityId(entityId);
-    if (registryDevice && registryDevice.domain === 'climate') return { ok: true as const, device: registryDevice };
+    if (registryDevice && registryDevice.domain === 'climate') {
+      return {
+        ok: true as const,
+        device: {
+          ...registryDevice,
+          supports_temperature: true,
+          capabilities: Array.from(new Set([...registryDevice.capabilities, 'set_temperature' as const, 'get_state' as const])),
+        },
+      };
+    }
 
     const discovered = await haClient.discoverEntities().catch(() => []);
     const discoveredDevice = discovered.find((device) => device.entity_id === entityId && device.domain === 'climate');
@@ -72,9 +81,9 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
         supports_brightness: false,
         supports_value: false,
         supports_temperature: true,
-        supports_hvac_mode: true,
-        supports_fan_mode: true,
-        supports_swing_mode: true,
+        supports_hvac_mode: (discoveredDevice.hvac_modes?.length ?? 0) > 0 || discoveredDevice.supports_hvac_mode === true,
+        supports_fan_mode: (discoveredDevice.fan_modes?.length ?? 0) > 0 || discoveredDevice.supports_fan_mode === true,
+        supports_swing_mode: (discoveredDevice.swing_modes?.length ?? 0) > 0 || discoveredDevice.supports_swing_mode === true,
         temperature_min: discoveredDevice.temperature_min,
         temperature_max: discoveredDevice.temperature_max,
         temperature_step: discoveredDevice.temperature_step,
@@ -121,21 +130,22 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
 
     async set_climate_temperature(input: unknown) {
       const parsed = setClimateTemperatureInputSchema.parse(input);
-      const resolved = await getClimateDevice(parsed.entity_id);
+      const entityId = parsed.entity_id || 'climate.lmkj_wsd001_c5aa_air_conditioner';
+      const resolved = await getClimateDevice(entityId);
       if (!resolved.ok) return resolved.failure;
 
       const policyCheck = policy.canSetClimateTemperature(resolved.device, parsed.temperature);
-      if (!policyCheck.allowed) return fail(policyCheck.reason, '空调温度控制被拒绝', { entity_id: parsed.entity_id, temperature: parsed.temperature });
+      if (!policyCheck.allowed) return fail(policyCheck.reason, '空调温度控制被拒绝', { entity_id: entityId, temperature: parsed.temperature });
 
-      const beforeState = await haClient.getState(parsed.entity_id);
+      const beforeState = await haClient.getState(entityId).catch(() => ({ state: 'unknown' }));
       if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
-        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: parsed.entity_id, state: 'unavailable' });
+        return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
       }
-      const response = await haClient.setClimateTemperature(parsed.entity_id, parsed.temperature);
-      const state = await haClient.getState(parsed.entity_id);
+      const response = await haClient.setClimateTemperature(entityId, parsed.temperature);
+      const state = await haClient.getState(entityId).catch(() => ({ state: 'unknown' }));
       const summary = buildStateSummary(state);
-      await auditSuccess('set_climate_temperature', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, { ...summary, temperature_after: parsed.temperature });
-      return ok({ entity_id: parsed.entity_id, action: 'set_temperature', temperature: parsed.temperature, ...summary, raw: response });
+      await auditSuccess('set_climate_temperature', { ...parsed, entity_id: entityId, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, entityId, { ...summary, temperature_after: parsed.temperature });
+      return ok({ entity_id: entityId, action: 'set_temperature', temperature: parsed.temperature, ...summary, raw: response });
     },
 
     async set_climate_hvac_mode(input: unknown) {

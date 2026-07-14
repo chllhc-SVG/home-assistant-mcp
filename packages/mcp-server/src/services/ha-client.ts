@@ -179,7 +179,7 @@ export class HaClient {
     });
   }
 
-  private async discoverEntitiesWithoutCache(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
+  private async discoverEntitiesWithoutCache() {
     const toStringValue = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : undefined;
     const normalizeEntityEntry = (entity: Record<string, unknown>): HaEntityRegistryEntry => ({
       entity_id: toStringValue(entity.ei) ?? toStringValue(entity.entity_id) ?? '',
@@ -268,7 +268,7 @@ export class HaClient {
     const entityRegistryByEntityId = new Map(entityRegistry.filter((entry): entry is HaEntityRegistryEntry & { entity_id: string } => typeof entry.entity_id === 'string').map((entry) => [entry.entity_id, entry]));
 
     return states
-      .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
+      .filter((item) => typeof item.entity_id === 'string')
       .map((item) => {
         const entityId = item.entity_id as string;
         const snapshot = extractEntityCapabilitySnapshot(item);
@@ -286,8 +286,8 @@ export class HaClient {
           friendly_name: typeof displayRaw?.en === 'string' ? displayRaw.en : entityEntry?.name ?? entityEntry?.original_name ?? entityId,
           supports_brightness: false,
           supports_value: false,
-          supports_temperature: false,
-          supports_hvac_mode: false,
+          supports_temperature: entityId.startsWith('climate.'),
+          supports_hvac_mode: entityId.startsWith('climate.'),
           supports_fan_mode: false,
           supports_swing_mode: false,
           supported_color_modes: [],
@@ -311,17 +311,17 @@ export class HaClient {
       });
   }
 
-  async discoverEntities(domains = ['light', 'switch', 'button', 'number', 'climate', 'sensor']) {
-    const key = domains.slice().sort().join('|');
+  async discoverEntities() {
+    const key = 'all';
     const now = Date.now();
     const cached = this.entityDiscoveryCache.get(key);
     if (cached && cached.expiresAt > now) return cached.value;
     const inFlight = this.entityDiscoveryInFlight.get(key);
     if (inFlight) return inFlight;
 
-    const promise = this.discoverEntitiesWithoutCache(domains)
+    const promise = this.discoverEntitiesWithoutCache()
       .then((value) => {
-        this.entityDiscoveryCache.set(key, { expiresAt: Date.now() + 10_000, value });
+        this.entityDiscoveryCache.set(key, { expiresAt: Date.now() + 10 * 60_000, value });
         this.entityDiscoveryInFlight.delete(key);
         return value;
       })

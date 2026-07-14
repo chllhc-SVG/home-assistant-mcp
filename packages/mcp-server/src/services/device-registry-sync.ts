@@ -60,6 +60,39 @@ export const hydrateRegistryFromWhitelist = (registry: LightRegistry, records: W
   registry.replace(records.map((record) => toDevice(record)));
 };
 
+export const hydrateRegistryFromHomeAssistant = async ({
+  registry,
+  haClient,
+  whitelistStore,
+}: {
+  registry: LightRegistry;
+  haClient: HaClient;
+  whitelistStore: WhitelistStore;
+}) => {
+  const [records, snapshots] = await Promise.all([whitelistStore.list(), haClient.discoverEntities()]);
+  const recordsByEntityId = new Map(records.map((record) => [record.entity_id, record]));
+  const devices = snapshots.map((snapshot) => {
+    const record = recordsByEntityId.get(snapshot.entity_id);
+    return toDevice({
+      entity_id: snapshot.entity_id,
+      display_name: snapshot.device_name ?? snapshot.friendly_name ?? snapshot.entity_id,
+      friendly_name: snapshot.friendly_name,
+      device_id: snapshot.device_id ?? snapshot.entity_id,
+      device_name: snapshot.device_name,
+      domain: (snapshot.domain ?? snapshot.entity_id.split('.')[0]) as WhitelistRecord['domain'],
+      room: snapshot.area_name ?? '',
+      area_id: snapshot.area_id,
+      area_name: snapshot.area_name,
+      enabled: record?.enabled ?? true,
+    }, snapshot);
+  });
+
+  registry.setExposure(records.filter((record) => record.enabled).map((record) => record.entity_id));
+  registry.replace(devices);
+
+  return { devices, discovered_count: snapshots.length };
+};
+
 export const syncDeviceRegistryFromHomeAssistant = async ({
   registry,
   haClient,

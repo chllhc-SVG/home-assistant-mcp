@@ -7,7 +7,7 @@ import { LightRegistry } from './services/light-registry.js';
 import { PolicyEngine } from './services/policy-engine.js';
 import { createTools } from './tools/index.js';
 import { WhitelistStore } from './services/whitelist-store.js';
-import { hydrateRegistryFromWhitelist } from './services/device-registry-sync.js';
+import { hydrateRegistryFromHomeAssistant, hydrateRegistryFromWhitelist } from './services/device-registry-sync.js';
 
 const seedToolByDomain: Record<LightDevice['domain'], string> = {
   light: 'get_light_state',
@@ -60,6 +60,9 @@ export const createRuntime = async (): Promise<Runtime> => {
 
   const records = await whitelistStore.list();
   hydrateRegistryFromWhitelist(registry, records);
+  await hydrateRegistryFromHomeAssistant({ registry, haClient, whitelistStore }).catch((error) => {
+    console.warn('[runtime] Home Assistant startup discovery failed, using whitelist registry only', error);
+  });
 
   return {
     config,

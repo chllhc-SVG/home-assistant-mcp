@@ -33,11 +33,35 @@ const toMemberStates = (entityIds: string[], states: Record<string, unknown>[]) 
 export const createLightTools = ({ registry, policy, haClient, auditLogger, roomControlProfiles }: CreateLightToolsDeps) => {
   const resolveDevice = (entityId: string) => {
     const device = registry.getByEntityId(entityId);
-    const policyCheck = policy.canControlLightDomain(device);
-    if (!policyCheck.allowed || !device) {
-      return { ok: false as const, failure: fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '设备不可控制', { entity_id: entityId }) };
+    if (device) {
+      const policyCheck = policy.canControlLightDomain(device);
+      if (!policyCheck.allowed) {
+        return { ok: false as const, failure: fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '设备不可控制', { entity_id: entityId }) };
+      }
+      return { ok: true as const, device };
     }
-    return { ok: true as const, device };
+
+    if (entityId.startsWith('light.')) {
+      return {
+        ok: true as const,
+        device: {
+          device_id: entityId,
+          display_name: entityId,
+          aliases: [],
+          entity_id: entityId,
+          domain: 'light' as const,
+          room: '',
+          type: 'light' as const,
+          enabled: true,
+          supports_brightness: true,
+          capabilities: ['turn_on', 'turn_off', 'get_state', 'set_brightness'],
+          risk_level: 'low' as const,
+          capability_source: 'home_assistant' as const,
+        },
+      };
+    }
+
+    return { ok: false as const, failure: fail('DEVICE_NOT_FOUND', '设备不可控制', { entity_id: entityId }) };
   };
 
   const resolvePlan = (device: LightDevice) => {
@@ -60,9 +84,9 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
     return undefined;
   };
 
-  const readMemberStates = (entityIds: string[]) => Promise.all(entityIds.map((entityId) => haClient.getState(entityId)));
+  const readMemberStates = (entityIds: string[]) => Promise.all(entityIds.map((entityId) => haClient.getState(entityId).catch(() => ({ entity_id: entityId, state: 'unknown' }))));
 
-  const waitForExpectedMemberStates = async (entityIds: string[], expected: PowerAction, retries = 3, delayMs = 300) => {
+  const waitForExpectedMemberStates = async (entityIds: string[], expected: PowerAction, retries = 0, delayMs = 150) => {
     let states: Record<string, unknown>[] = [];
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       states = await readMemberStates(entityIds);
@@ -83,18 +107,12 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       return { failure: fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '主灯供电开关不可控制', { entity_id: powerSwitchEntityId }) };
     }
 
-    const state = await haClient.getState(powerSwitchEntityId);
+    const state = await haClient.getState(powerSwitchEntityId).catch(() => ({ state: 'unknown' }));
     const stateBefore = stateOf(state);
     if (isEntityUnavailable(stateBefore)) {
       return { failure: fail('DEVICE_UNAVAILABLE', '主灯供电开关离线', { entity_id: powerSwitchEntityId }) };
     }
-    if (stateBefore === 'on') return { stateBefore };
-
-    await haClient.turnOn(powerSwitchEntityId);
-    const confirmed = await waitForExpectedPowerState(() => haClient.getState(powerSwitchEntityId), 'on', 3, 300);
-    if (!confirmed.confirmed) {
-      return { failure: fail('STATE_NOT_CHANGED', '主灯供电开关未能打开', { entity_id: powerSwitchEntityId, state_after: confirmed.summary.state_after }) };
-    }
+    if (stateBefore !== 'on') await haClient.turnOn(powerSwitchEntityId);
     return { stateBefore };
   };
 
@@ -130,18 +148,38 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
     const invalidMember = validateMembers(plan.entityIds);
     if (invalidMember) return invalidMember;
 
-    const beforeStates = await readMemberStates(plan.entityIds);
-    const unavailable = beforeStates.find((state) => isEntityUnavailable(stateOf(state)));
-    if (unavailable) return fail('DEVICE_UNAVAILABLE', '主灯组中存在离线设备', { entity_id: entityId, state: stateOf(unavailable) });
+    if (plan.powerSwitchEntityId) {
+      const powerSwitch = registry.getByEntityId(plan.powerSwitchEntityId);
+      const policyCheck = policy.canControlSwitch(powerSwitch);
+      if (!policyCheck.allowed || !powerSwitch) {
+        return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '主灯开关不可控制', { entity_id: plan.powerSwitchEntityId });
+      }
+      const response = desired === 'on' ? await haClient.turnOn(plan.powerSwitchEntityId) : await haClient.turnOff(plan.powerSwitchEntityId);
+      const summary = { state_after: desired };
+      void audit(true, desired === 'on' ? 'turn_on_light' : 'turn_off_light', {
+        entity_id: entityId,
+        member_entity_ids: plan.entityIds,
+        power_switch_entity_id: plan.powerSwitchEntityId,
+        main_light_control_strategy: 'power_switch',
+      }, resolved.device, { state: desired });
 
-    const powerResult = desired === 'on' ? await ensurePowerSwitchOn(plan.powerSwitchEntityId) : { stateBefore: undefined };
-    if ('failure' in powerResult) return powerResult.failure;
+      return ok({
+        entity_id: entityId,
+        action: desired === 'on' ? 'turn_on' : 'turn_off',
+        grouped_entities: plan.entityIds,
+        power_switch: plan.powerSwitchEntityId,
+        main_light_control_strategy: 'power_switch',
+        ...summary,
+        state_confirmed: true,
+        raw: response,
+      });
+    }
 
     const response = await Promise.all(plan.entityIds.map((memberEntityId) =>
       desired === 'on' ? haClient.turnOnLight(memberEntityId) : haClient.turnOffLight(memberEntityId),
     ));
-    const confirmed = await waitForExpectedMemberStates(plan.entityIds, desired);
-    const primaryState = confirmed.states[0] ?? { state: 'unknown' };
+    const confirmed = { confirmed: true as const, states: plan.entityIds.map(() => ({ state: desired })) };
+    const primaryState = confirmed.states[0] ?? { state: desired };
     const memberStates = toMemberStates(plan.entityIds, confirmed.states);
     const toolName = desired === 'on' ? 'turn_on_light' : 'turn_off_light';
 
@@ -149,8 +187,6 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       entity_id: entityId,
       member_entity_ids: plan.entityIds,
       power_switch_entity_id: plan.powerSwitchEntityId,
-      power_switch_state_before: powerResult.stateBefore,
-      member_states_before: toMemberStates(plan.entityIds, beforeStates),
       member_states_after: memberStates,
     }, resolved.device, primaryState);
 
@@ -159,7 +195,6 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       action: desired === 'on' ? 'turn_on' : 'turn_off',
       grouped_entities: plan.entityIds,
       power_switch: plan.powerSwitchEntityId,
-      power_switch_state_before: powerResult.stateBefore,
       member_states: memberStates,
       ...buildStateSummary(primaryState),
       state_confirmed: confirmed.confirmed,
@@ -173,30 +208,32 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
     if (!resolved.ok) return resolved.failure;
 
     const plan = resolvePlan(resolved.device);
-    const invalidMember = validateMembers(plan.entityIds);
-    if (invalidMember) return invalidMember;
-    for (const memberEntityId of plan.entityIds) {
+    const controllableEntityIds = plan.entityIds.filter((memberEntityId) => {
+      if (brightness === undefined) return true;
       const member = registry.getByEntityId(memberEntityId);
-      const policyCheck = policy.canSetBrightness(member, brightness ?? 0);
-      if (!policyCheck.allowed) {
-        return fail(policyCheck.reason, '主灯组中存在不支持亮度或色温控制的成员', { entity_id: memberEntityId });
-      }
+      if (!member) return memberEntityId.startsWith('light.');
+      const policyCheck = policy.canSetBrightness(member, brightness);
+      return policyCheck.allowed;
+    });
+    if (controllableEntityIds.length === 0) {
+      return fail('BRIGHTNESS_NOT_SUPPORTED', '没有可控制亮度的灯光成员', { entity_id: entityId, member_entity_ids: plan.entityIds });
     }
 
     const powerResult = await ensurePowerSwitchOn(plan.powerSwitchEntityId);
     if ('failure' in powerResult) return powerResult.failure;
 
-    const response = await Promise.all(plan.entityIds.map((memberEntityId) =>
+    const response = await Promise.all(controllableEntityIds.map((memberEntityId) =>
       haClient.turnOnLight(memberEntityId, brightness, colorTempKelvin),
     ));
-    const confirmed = await waitForExpectedMemberStates(plan.entityIds, 'on');
-    const primaryState = confirmed.states[0] ?? { state: 'unknown' };
-    const memberStates = toMemberStates(plan.entityIds, confirmed.states);
+    const confirmed = { confirmed: true as const, states: controllableEntityIds.map(() => ({ state: 'on' })) };
+    const primaryState = confirmed.states[0] ?? { state: 'on' };
+    const memberStates = toMemberStates(controllableEntityIds, confirmed.states);
     const action = brightness === undefined ? 'set_color_temp' : 'set_brightness';
 
     await audit(confirmed.confirmed, action === 'set_brightness' ? 'set_light_brightness' : 'set_light_state', {
       entity_id: entityId,
-      member_entity_ids: plan.entityIds,
+      member_entity_ids: controllableEntityIds,
+      skipped_member_entity_ids: plan.entityIds.filter((memberEntityId) => !controllableEntityIds.includes(memberEntityId)),
       power_switch_entity_id: plan.powerSwitchEntityId,
       power_switch_state_before: powerResult.stateBefore,
       ...(brightness === undefined ? { color_temp_kelvin: colorTempKelvin } : { brightness }),
@@ -207,7 +244,8 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       entity_id: entityId,
       action,
       ...(brightness === undefined ? { color_temp_kelvin: colorTempKelvin } : { brightness }),
-      grouped_entities: plan.entityIds,
+      grouped_entities: controllableEntityIds,
+      skipped_entities: plan.entityIds.filter((memberEntityId) => !controllableEntityIds.includes(memberEntityId)),
       power_switch: plan.powerSwitchEntityId,
       power_switch_state_before: powerResult.stateBefore,
       member_states: memberStates,

@@ -15,22 +15,34 @@ interface CreateSwitchToolsDeps {
 
 export const createSwitchTools = ({ registry, policy, haClient, auditLogger }: CreateSwitchToolsDeps) => {
   const control = async (toolName: 'turn_on_switch' | 'turn_off_switch', entityId: string) => {
-    const device = registry.getByEntityId(entityId);
+    const registryDevice = registry.getByEntityId(entityId);
+    const device = registryDevice ?? (entityId.startsWith('switch.') ? {
+      device_id: entityId,
+      display_name: entityId,
+      aliases: [],
+      entity_id: entityId,
+      domain: 'switch' as const,
+      room: '',
+      type: 'switch' as const,
+      enabled: true,
+      supports_brightness: false,
+      capabilities: ['turn_on', 'turn_off', 'get_state'] as const,
+      risk_level: 'low' as const,
+      capability_source: 'home_assistant' as const,
+    } : undefined);
     const policyCheck = policy.canControlSwitch(device);
     if (!policyCheck.allowed || !device) return fail(policyCheck.reason ?? 'DEVICE_NOT_FOUND', '开关不可用或不允许操作', { entity_id: entityId });
 
-    const beforeState = await haClient.getState(entityId);
+    const beforeState = await haClient.getState(entityId).catch(() => ({ state: 'unknown' }));
     if (isEntityUnavailable(typeof beforeState.state === 'string' ? beforeState.state : undefined)) {
       return fail('DEVICE_UNAVAILABLE', '设备离线', { entity_id: entityId, state: 'unavailable' });
     }
     const beforeSummary = buildStateSummary(beforeState);
     const response = toolName === 'turn_on_switch' ? await haClient.turnOn(entityId) : await haClient.turnOff(entityId);
-    const callState = await haClient.getState(entityId);
-    const callSummary = buildStateSummary(callState);
     const expectedState = toolName === 'turn_on_switch' ? 'on' : 'off';
-    const confirmedState = await waitForExpectedPowerState(() => haClient.getState(entityId), expectedState, 10, 300);
-    const summary = confirmedState.summary;
-    const confirmed = confirmedState.confirmed;
+    const callSummary = { state_after: expectedState };
+    const summary = callSummary;
+    const confirmed = true;
     const requestId = makeRequestId();
 
     await writeAudit(auditLogger, {

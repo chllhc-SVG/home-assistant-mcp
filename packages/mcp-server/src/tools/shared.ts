@@ -74,5 +74,7 @@ export const waitForExpectedPowerState = async (
 };
 
 export const writeAudit = async (auditLogger: AuditLogger, event: AuditEvent) => {
-  await auditLogger.write(event);
+  void auditLogger.write(event).catch((error) => {
+    console.error('[audit] failed to write event', error);
+  });
 };

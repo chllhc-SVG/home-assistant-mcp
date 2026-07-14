@@ -39,7 +39,14 @@ export class LightRegistry {
       if (filter?.enabledOnly !== false && !device.enabled) return false;
       if (filter?.domain && device.domain !== filter.domain) return false;
       if (filter?.room && device.room !== filter.room) return false;
-      if (filter?.keyword && ![device.display_name, ...device.aliases].some((value) => normalizeText(value).includes(normalizeText(filter.keyword!)))) return false;
+      if (filter?.keyword && ![
+        device.display_name,
+        device.entity_id,
+        device.room,
+        device.area_name ?? '',
+        device.friendly_name ?? '',
+        ...device.aliases,
+      ].filter(Boolean).some((value) => normalizeText(value).includes(normalizeText(filter.keyword!)))) return false;
       if (filter?.supportBrightness !== undefined && device.supports_brightness !== filter.supportBrightness) return false;
       return true;
     });
@@ -67,8 +74,8 @@ export class LightRegistry {
       const aliasHits = device.aliases.reduce((count, alias) => count + (normalizeText(alias).includes(normalizedQuery) ? 1 : 0), 0);
       const roomHit = device.room && normalizeText(device.room).includes(normalizedQuery) ? 1 : 0;
       const areaHit = device.area_name && normalizeText(device.area_name).includes(normalizedQuery) ? 1 : 0;
-      const climateBoost = temperatureIntent ? ((device.domain === 'climate' || device.supports_temperature) ? 60 : -20) : 0;
-      const lightBoost = brightnessIntent ? (device.domain === 'light' ? 60 : -10) : 0;
+      const climateBoost = temperatureIntent ? ((device.domain === 'climate' || device.supports_temperature) ? 200 : -80) : 0;
+      const lightBoost = brightnessIntent ? ((device.domain === 'light' && device.supports_brightness) ? 160 : device.domain === 'light' ? 80 : -40) : 0;
       const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + climateBoost + lightBoost + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
       return { device, score };
     });
