@@ -66,7 +66,15 @@ export class PolicyEngine {
   canSetClimateTemperature(device: LightDevice | undefined, temperature: number) {
     const base = this.canControlLight(device);
     if (!base.allowed || !device) return base;
-    if (device.domain !== 'climate' || !device.supports_temperature) return { allowed: false as const, reason: 'TEMPERATURE_NOT_SUPPORTED' as const };
+    const temperatureCapable =
+      device.domain === 'climate' &&
+      (device.supports_temperature ||
+        typeof device.temperature_min === 'number' ||
+        typeof device.temperature_max === 'number' ||
+        typeof device.current_temperature === 'number' ||
+        typeof device.target_temperature === 'number' ||
+        Array.isArray(device.hvac_modes));
+    if (!temperatureCapable) return { allowed: false as const, reason: 'TEMPERATURE_NOT_SUPPORTED' as const };
     if (!Number.isFinite(temperature)) return { allowed: false as const, reason: 'INVALID_ARGUMENT' as const };
     if (typeof device.temperature_min === 'number' && temperature < device.temperature_min) return { allowed: false as const, reason: 'TEMPERATURE_OUT_OF_RANGE' as const };
     if (typeof device.temperature_max === 'number' && temperature > device.temperature_max) return { allowed: false as const, reason: 'TEMPERATURE_OUT_OF_RANGE' as const };

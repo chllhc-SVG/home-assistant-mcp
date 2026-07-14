@@ -50,6 +50,8 @@ export class LightRegistry {
   resolve(query: string, filter?: Pick<DeviceFilter, 'domain' | 'room'>) {
     const normalizedQuery = normalizeText(query);
     const queryTokens = tokenize(query);
+    const temperatureIntent = /空调|温度|制冷|制热|恒温|温控/.test(normalizedQuery);
+    const brightnessIntent = /亮度|调亮|调暗|变亮|变暗|灯光|主灯/.test(normalizedQuery);
     const scored = this.list({ ...filter, enabledOnly: true }).map((device) => {
       const haystacks = unique([
         device.display_name,
@@ -65,7 +67,9 @@ export class LightRegistry {
       const aliasHits = device.aliases.reduce((count, alias) => count + (normalizeText(alias).includes(normalizedQuery) ? 1 : 0), 0);
       const roomHit = device.room && normalizeText(device.room).includes(normalizedQuery) ? 1 : 0;
       const areaHit = device.area_name && normalizeText(device.area_name).includes(normalizedQuery) ? 1 : 0;
-      const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
+      const climateBoost = temperatureIntent ? ((device.domain === 'climate' || device.supports_temperature) ? 60 : -20) : 0;
+      const lightBoost = brightnessIntent ? (device.domain === 'light' ? 60 : -10) : 0;
+      const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + climateBoost + lightBoost + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
       return { device, score };
     });
 

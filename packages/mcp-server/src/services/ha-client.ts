@@ -335,7 +335,11 @@ export class HaClient {
   }
 
   discoverLights() {
-    return this.discoverEntities(['light']);
+    return this.discoverEntities().then((items) => items.filter((item) => item.domain === 'light'));
+  }
+
+  discoverClimateDevices() {
+    return this.discoverEntities().then((items) => items.filter((item) => item.domain === 'climate'));
   }
 
   turnOn(entityId: string) {

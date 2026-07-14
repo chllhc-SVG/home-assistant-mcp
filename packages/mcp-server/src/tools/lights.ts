@@ -235,13 +235,14 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       const parsed = resolveLightInputSchema.parse(input);
       const matchedByName = roomControlProfiles.flatMap((profile) => {
         const names = [profile.main_light.display_name, ...(profile.main_light.aliases ?? [])];
-        if (!names.some((name) => name.includes(parsed.query))) return [];
+        const brightnessIntent = /亮度|调亮|调暗|变亮|变暗|灯光|主灯/.test(parsed.query);
+        if (!brightnessIntent && !names.some((name) => name.includes(parsed.query))) return [];
         return profile.main_light.member_entity_ids
           .map((entityId) => registry.getByEntityId(entityId))
           .filter((device): device is LightDevice => Boolean(device));
       });
       const candidates = summarizeLights([
-        ...registry.resolve(parsed.query),
+        ...registry.resolve(parsed.query, { domain: /亮度|调亮|调暗|变亮|变暗|灯光|主灯/.test(parsed.query) ? 'light' : undefined }),
         ...registry.list({ enabledOnly: true }).filter((device) => {
           const normalizedQuery = parsed.query.trim().toLowerCase();
           const semanticFields = [
