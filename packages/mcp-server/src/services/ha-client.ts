@@ -187,43 +187,62 @@ export class HaClient {
       area_id: toStringValue(entity.ai) ?? toStringValue(entity.area_id),
       platform: toStringValue(entity.pl) ?? toStringValue(entity.platform),
       unique_id: toStringValue(entity.unique_id) ?? toStringValue(entity.tk),
+      original_name: toStringValue(entity.original_name),
       name: toStringValue(entity.en) ?? toStringValue(entity.name) ?? toStringValue(entity.original_name),
+      device_info: undefined,
     });
     const normalizeDeviceEntry = (device: Record<string, unknown>): HaDeviceInfo => ({
-      id: toStringValue(device.id),
-      name: toStringValue(device.name),
+      id: toStringValue(device.id) ?? toStringValue(device.device_id),
+      name: toStringValue(device.name) ?? toStringValue(device.name_by_user),
       name_by_user: toStringValue(device.name_by_user),
       manufacturer: toStringValue(device.manufacturer),
       model: toStringValue(device.model),
       area_id: toStringValue(device.area_id),
     });
     const normalizeAreaEntry = (area: Record<string, unknown>): HaAreaInfo => ({
-      area_id: toStringValue(area.area_id) ?? toStringValue(area.id) ?? '',
-      name: toStringValue(area.name) ?? '',
+      area_id: toStringValue(area.area_id) ?? toStringValue(area.id) ?? toStringValue(area.ai) ?? '',
+      name: toStringValue(area.name) ?? toStringValue(area.area_name) ?? '',
     });
 
-    const [states, wsResults] = await Promise.all([
+    const [states, registryData] = await Promise.all([
       this.listStates(),
       this.wsBatchRequest([
         { id: 1, type: 'config/entity_registry/list_for_display' },
         { id: 2, type: 'config/entity_registry/list' },
         { id: 3, type: 'config/device_registry/list' },
         { id: 4, type: 'config/area_registry/list' },
-      ]),
+      ])
+        .then(async (results) => {
+          const displayResult = results.get(1);
+          const fullResult = results.get(2);
+          const deviceResult = results.get(3);
+          const areaResult = results.get(4);
+
+          const asArray = (value: unknown) => Array.isArray(value) ? value : [];
+          const asObject = (value: unknown) => value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+
+          const displayEntities = displayResult?.success
+            ? asArray(asObject(displayResult.result)?.entities).map(normalizeEntityEntry).filter((entry) => entry.entity_id)
+            : [];
+          const fullEntityRegistry = fullResult?.success
+            ? asArray(fullResult.result).map(normalizeEntityEntry).filter((entry) => entry.entity_id)
+            : [];
+          const deviceRegistry = deviceResult?.success
+            ? asArray(asObject(deviceResult.result)?.devices ?? deviceResult.result).map(normalizeDeviceEntry)
+            : [];
+          const areas = areaResult?.success
+            ? asArray(asObject(areaResult.result)?.areas ?? areaResult.result).map(normalizeAreaEntry).filter((area) => area.area_id)
+            : [];
+
+          return {
+            displayEntityRegistry: displayEntities,
+            fullEntityRegistry,
+            deviceRegistry,
+            areas,
+          };
+        })
     ]);
-    const resultFor = <T>(id: number): T | undefined => {
-      const result = wsResults.get(id);
-      if (!result?.success) {
-        console.error('[ha-ws] registry request failed', { id, error: result?.error?.message });
-        return undefined;
-      }
-      return result.result as T | undefined;
-    };
-    const displayPayload = resultFor<{ entities: Array<Record<string, unknown>> }>(1);
-    const displayEntityRegistry = displayPayload?.entities.map(normalizeEntityEntry).filter((entry) => entry.entity_id) ?? [];
-    const fullEntityRegistry = (resultFor<Array<Record<string, unknown>>>(2) ?? []).map(normalizeEntityEntry).filter((entry) => entry.entity_id);
-    const deviceRegistry = (resultFor<Array<Record<string, unknown>>>(3) ?? []).map(normalizeDeviceEntry);
-    const areas = (resultFor<Array<Record<string, unknown>>>(4) ?? []).map(normalizeAreaEntry).filter((area) => area.area_id);
+    const { displayEntityRegistry, fullEntityRegistry, deviceRegistry, areas } = registryData;
     const entityRegistry = [...displayEntityRegistry, ...fullEntityRegistry].reduce<HaEntityRegistryEntry[]>((entries, entry) => {
       const existingIndex = entries.findIndex((item) => item.entity_id === entry.entity_id);
       if (existingIndex === -1) return [...entries, entry];
@@ -240,6 +259,9 @@ export class HaClient {
       deviceRegistry: deviceRegistry.length,
       areas: areas.length,
     });
+    console.log('[ha-registry] sample entities', entityRegistry.slice(0, 10));
+    console.log('[ha-registry] sample devices', deviceRegistry.slice(0, 10));
+    console.log('[ha-registry] sample areas', areas.slice(0, 10));
 
     const areaById = new Map(areas.map((area) => [area.area_id, area]));
     const deviceRegistryById = new Map(deviceRegistry.filter((device): device is HaDeviceInfo & { id: string } => typeof device.id === 'string').map((device) => [device.id, device]));
@@ -248,17 +270,19 @@ export class HaClient {
     return states
       .filter((item) => typeof item.entity_id === 'string' && domains.some((domain) => (item.entity_id as string).startsWith(`${domain}.`)))
       .map((item) => {
-        const snapshot = extractEntityCapabilitySnapshot(item);
         const entityId = item.entity_id as string;
-        const registryEntry = entityRegistryByEntityId.get(entityId);
-        const deviceId = registryEntry?.device_id;
-        const areaId = registryEntry?.area_id;
+        const snapshot = extractEntityCapabilitySnapshot(item);
+        const entityEntry = entityRegistryByEntityId.get(entityId);
+        const displayEntry = displayEntityRegistry.find((entry) => entry.ei === entityId);
+        const deviceId = displayEntry?.di ?? entityEntry?.device_id;
         const device = deviceId ? deviceRegistryById.get(deviceId) : undefined;
+        const areaId = displayEntry?.ai ?? entityEntry?.area_id ?? device?.area_id;
+        const area = areaId ? areaById.get(areaId) : undefined;
         const base = snapshot ?? {
           entity_id: entityId,
           domain: entityId.split('.')[0],
           state: 'unknown',
-          friendly_name: entityId,
+          friendly_name: displayEntry?.en ?? entityEntry?.name ?? entityEntry?.original_name ?? entityId,
           supports_brightness: false,
           supports_value: false,
           supports_temperature: false,
@@ -274,14 +298,14 @@ export class HaClient {
 
         return {
           ...base,
-          device_id: deviceId ?? undefined,
-          device_name: device?.name_by_user ?? device?.name ?? device?.model ?? registryEntry?.device_info?.name ?? undefined,
+          device_id: deviceId,
+          device_name: device?.name_by_user ?? device?.name ?? entityEntry?.name ?? entityEntry?.original_name ?? displayEntry?.en ?? entityId,
           device_manufacturer: device?.manufacturer,
           device_model: device?.model,
-          area_id: areaId ?? device?.area_id ?? undefined,
-          area_name: (areaId ? areaById.get(areaId)?.name : undefined) ?? (device?.area_id ? areaById.get(device.area_id)?.name : undefined),
-          unique_id: registryEntry?.unique_id,
-          platform: registryEntry?.platform,
+          area_id: areaId,
+          area_name: area?.name,
+          unique_id: entityEntry?.unique_id,
+          platform: entityEntry?.platform ?? displayEntry?.pl,
         };
       });
   }

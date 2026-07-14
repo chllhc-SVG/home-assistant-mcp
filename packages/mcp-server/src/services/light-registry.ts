@@ -9,6 +9,10 @@ interface DeviceFilter {
   enabledOnly?: boolean;
 }
 
+const normalizeText = (value: string) => value.toLowerCase().replace(/[\s_\-]+/g, ' ').trim();
+const tokenize = (value: string) => normalizeText(value).split(/\s+/).filter(Boolean);
+const unique = (values: string[]) => Array.from(new Set(values));
+
 export class LightRegistry {
   private devices: LightDevice[];
   private exposureDeviceIds: Set<string> | null = null;
@@ -35,7 +39,7 @@ export class LightRegistry {
       if (filter?.enabledOnly !== false && !device.enabled) return false;
       if (filter?.domain && device.domain !== filter.domain) return false;
       if (filter?.room && device.room !== filter.room) return false;
-      if (filter?.keyword && ![device.display_name, ...device.aliases].some((value) => value.includes(filter.keyword!))) return false;
+      if (filter?.keyword && ![device.display_name, ...device.aliases].some((value) => normalizeText(value).includes(normalizeText(filter.keyword!)))) return false;
       if (filter?.supportBrightness !== undefined && device.supports_brightness !== filter.supportBrightness) return false;
       return true;
     });
@@ -44,10 +48,31 @@ export class LightRegistry {
   }
 
   resolve(query: string, filter?: Pick<DeviceFilter, 'domain' | 'room'>) {
-    const normalized = query.trim();
-    return this.list({ ...filter, enabledOnly: true }).filter((device) =>
-      [device.display_name, ...device.aliases].some((value) => value.includes(normalized)),
-    );
+    const normalizedQuery = normalizeText(query);
+    const queryTokens = tokenize(query);
+    const scored = this.list({ ...filter, enabledOnly: true }).map((device) => {
+      const haystacks = unique([
+        device.display_name,
+        device.entity_id,
+        device.room,
+        device.area_name ?? '',
+        device.friendly_name ?? '',
+        ...device.aliases,
+      ].filter(Boolean).map(normalizeText));
+      const joined = haystacks.join(' ');
+      const exactMatch = joined.includes(normalizedQuery);
+      const tokenHits = queryTokens.reduce((count, token) => count + (joined.includes(token) ? 1 : 0), 0);
+      const aliasHits = device.aliases.reduce((count, alias) => count + (normalizeText(alias).includes(normalizedQuery) ? 1 : 0), 0);
+      const roomHit = device.room && normalizeText(device.room).includes(normalizedQuery) ? 1 : 0;
+      const areaHit = device.area_name && normalizeText(device.area_name).includes(normalizedQuery) ? 1 : 0;
+      const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
+      return { device, score };
+    });
+
+    return scored
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map(({ device }) => device);
   }
 
   getByEntityId(entityId: string) {

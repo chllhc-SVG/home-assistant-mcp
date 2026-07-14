@@ -26,7 +26,6 @@ interface CreateLightToolsDeps {
 
 type PowerAction = 'on' | 'off';
 
-const unique = (values: string[]) => Array.from(new Set(values));
 const stateOf = (state: Record<string, unknown>) => typeof state.state === 'string' ? state.state : 'unknown';
 const toMemberStates = (entityIds: string[], states: Record<string, unknown>[]) =>
   entityIds.map((entityId, index) => ({ entity_id: entityId, state: stateOf(states[index] ?? {}) }));
@@ -243,6 +242,18 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
       });
       const candidates = summarizeLights([
         ...registry.resolve(parsed.query),
+        ...registry.list({ enabledOnly: true }).filter((device) => {
+          const normalizedQuery = parsed.query.trim().toLowerCase();
+          const semanticFields = [
+            device.display_name,
+            device.entity_id,
+            device.room,
+            device.area_name ?? '',
+            device.friendly_name ?? '',
+            ...device.aliases,
+          ].map((value) => value.toLowerCase());
+          return semanticFields.some((value) => value.includes(normalizedQuery));
+        }),
         ...matchedByName.filter((device, index, devices) => devices.findIndex((item) => item.entity_id === device.entity_id) === index),
       ]);
       return ok({
