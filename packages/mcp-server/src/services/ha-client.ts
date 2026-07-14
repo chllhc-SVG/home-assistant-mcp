@@ -273,16 +273,17 @@ export class HaClient {
         const entityId = item.entity_id as string;
         const snapshot = extractEntityCapabilitySnapshot(item);
         const entityEntry = entityRegistryByEntityId.get(entityId);
-        const displayEntry = displayEntityRegistry.find((entry) => entry.ei === entityId);
-        const deviceId = displayEntry?.di ?? entityEntry?.device_id;
+        const displayEntry = displayEntityRegistry.find((entry) => entry.entity_id === entityId);
+        const displayRaw = displayEntry as unknown as Record<string, unknown> | undefined;
+        const deviceId = typeof displayRaw?.di === 'string' ? displayRaw.di : entityEntry?.device_id;
         const device = deviceId ? deviceRegistryById.get(deviceId) : undefined;
-        const areaId = displayEntry?.ai ?? entityEntry?.area_id ?? device?.area_id;
+        const areaId = typeof displayRaw?.ai === 'string' ? displayRaw.ai : entityEntry?.area_id ?? device?.area_id;
         const area = areaId ? areaById.get(areaId) : undefined;
         const base = snapshot ?? {
           entity_id: entityId,
           domain: entityId.split('.')[0],
           state: 'unknown',
-          friendly_name: displayEntry?.en ?? entityEntry?.name ?? entityEntry?.original_name ?? entityId,
+          friendly_name: typeof displayRaw?.en === 'string' ? displayRaw.en : entityEntry?.name ?? entityEntry?.original_name ?? entityId,
           supports_brightness: false,
           supports_value: false,
           supports_temperature: false,
@@ -299,13 +300,13 @@ export class HaClient {
         return {
           ...base,
           device_id: deviceId,
-          device_name: device?.name_by_user ?? device?.name ?? entityEntry?.name ?? entityEntry?.original_name ?? displayEntry?.en ?? entityId,
+          device_name: device?.name_by_user ?? device?.name ?? entityEntry?.name ?? entityEntry?.original_name ?? (typeof displayRaw?.en === 'string' ? displayRaw.en : entityId),
           device_manufacturer: device?.manufacturer,
           device_model: device?.model,
           area_id: areaId,
           area_name: area?.name,
           unique_id: entityEntry?.unique_id,
-          platform: entityEntry?.platform ?? displayEntry?.pl,
+          platform: entityEntry?.platform ?? displayRaw?.pl as string | undefined,
         };
       });
   }
