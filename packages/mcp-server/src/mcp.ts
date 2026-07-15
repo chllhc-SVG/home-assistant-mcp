@@ -64,11 +64,16 @@ const mergeUniqueDevices = (devices: LightDevice[]) => devices.reduce<LightDevic
 }, []);
 
 const findMainLightProfile = (runtime: Runtime, room?: string) => {
-  if (room) {
-    const matched = runtime.config.roomControlProfiles.find((profile) => profile.area_id === room || profile.main_light.display_name.includes(room) || profile.main_light.aliases?.some((alias) => alias.includes(room)));
-    if (matched) return matched;
-  }
-  return runtime.config.roomControlProfiles[0];
+  if (!room) return runtime.config.roomControlProfiles[0];
+
+  const normalizedRoom = room.toLowerCase().replace(/[\s_\-]+/g, ' ').trim();
+  const matched = runtime.config.roomControlProfiles.find((profile) => {
+    const names = [profile.area_id, profile.main_light.display_name, ...(profile.main_light.aliases ?? [])]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .map((value) => value.toLowerCase().replace(/[\s_\-]+/g, ' ').trim());
+    return names.some((name) => name.includes(normalizedRoom) || normalizedRoom.includes(name));
+  });
+  return matched ?? runtime.config.roomControlProfiles[0];
 };
 
 const getClimateCandidates = (runtime: Runtime, filter: { room?: string; keyword?: string } = {}) => mergeUniqueDevices([
@@ -450,6 +455,55 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
     const parsed = controlDeviceInputSchema.parse(params);
     const entityId = parsed.entity_id;
     const domain = entityId.split('.')[0];
+    const normalizedIntent = [entityId, parsed.action, readString(params.room), readString(params.keyword), readString(params.name)]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .join(' ')
+      .toLowerCase()
+      .replace(/[\s_\-]+/g, ' ');
+    const mainLightIntent = /主灯|main light|mainlight|调亮|变亮|调暗|亮度|灯光/.test(normalizedIntent);
+    const stripIntent = /灯带|灯条|strip/.test(normalizedIntent);
+    const isIndicatorStyleLight = /指示灯|开关|indicator/.test(normalizedIntent);
+
+    if (parsed.action === 'set_brightness' && mainLightIntent) {
+      return wrapToolResult(resultFrom(await dispatchToolCore(runtime, 'set_main_light_brightness', {
+        brightness: parsed.brightness ?? 0,
+        room: readString(params.room),
+        keyword: readString(params.keyword),
+      })));
+    }
+
+    if (parsed.action === 'turn_on' || parsed.action === 'turn_off') {
+      const preferredSwitchCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'switch' })
+        .filter((device) => /主灯|灯带|灯条|筒灯|strip|downlight|light/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
+      const preferredSwitchTarget = preferredSwitchCandidates[0];
+
+      if (preferredSwitchTarget && preferredSwitchTarget.entity_id !== entityId && (/主灯|灯带|灯条|筒灯|strip|downlight/.test(normalizedIntent) || domain === 'light')) {
+        return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
+          ? runtime.tools.turn_on_switch({ entity_id: preferredSwitchTarget.entity_id })
+          : runtime.tools.turn_off_switch({ entity_id: preferredSwitchTarget.entity_id }))));
+      }
+
+      const stripCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'switch' })
+        .filter((device) => /灯带|灯条|strip/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
+      const stripTarget = stripIntent ? stripCandidates[0] : undefined;
+
+      if (stripTarget && stripTarget.entity_id !== entityId) {
+        return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
+          ? runtime.tools.turn_on_switch({ entity_id: stripTarget.entity_id })
+          : runtime.tools.turn_off_switch({ entity_id: stripTarget.entity_id }))));
+      }
+
+      if (stripIntent && isIndicatorStyleLight) {
+        const lightCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'light' })
+          .filter((device) => !/指示灯|开关|indicator/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
+        const fallbackTarget = lightCandidates.find((device) => /灯带|灯条|strip/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase())) ?? lightCandidates[0];
+        if (fallbackTarget && fallbackTarget.entity_id !== entityId) {
+          return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
+            ? runtime.tools.turn_on_light({ entity_id: fallbackTarget.entity_id })
+            : runtime.tools.turn_off_light({ entity_id: fallbackTarget.entity_id }))));
+        }
+      }
+    }
 
     switch (parsed.action) {
       case 'turn_on':
@@ -500,10 +554,12 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
   }
 
   if (name === 'set_main_light_brightness') {
-    const profile = findMainLightProfile(runtime, readString(params.room));
     const brightness = typeof params.brightness === 'number' ? Math.max(0, Math.min(255, Math.round(params.brightness))) : undefined;
+    const room = readString(params.room);
+    const keyword = readString(params.keyword);
+    const profile = findMainLightProfile(runtime, room ?? keyword);
     if (!profile || brightness === undefined) {
-      return wrapToolResult(fail('INVALID_ARGUMENT', '缺少主灯配置或亮度参数', { room: readString(params.room), brightness: params.brightness }), true);
+      return wrapToolResult(fail('INVALID_ARGUMENT', '缺少主灯配置或亮度参数', { room, keyword, brightness: params.brightness }), true);
     }
 
     const results = await Promise.all(profile.main_light.member_entity_ids.map((entityId) =>
@@ -527,8 +583,9 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
     }
 
     const room = readString(params.room);
-    const devices = runtime.registry.list({ domain: 'light', room, enabledOnly: true });
-    const switchDevices = runtime.registry.list({ domain: 'switch', room, enabledOnly: true });
+    const searchKeyword = readString(params.keyword);
+    const devices = runtime.registry.list({ domain: 'light', room, keyword: searchKeyword, enabledOnly: true });
+    const switchDevices = runtime.registry.list({ domain: 'switch', room, keyword: searchKeyword, enabledOnly: true });
     const targets = [...devices, ...switchDevices];
     const uniqueTargets = targets.reduce<typeof targets>((acc, device) => {
       const targetKey = device.domain === 'light'
@@ -545,27 +602,29 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
 
     const lightEntityIds = uniqueTargets.filter((device) => device.domain === 'light').map((device) => device.entity_id);
     const switchEntityIds = uniqueTargets.filter((device) => device.domain === 'switch').map((device) => device.entity_id);
-    const tasks = [
-      lightEntityIds.length > 0 ? runtime.haClient.turn(state, 'light', lightEntityIds) : Promise.resolve(null),
-      switchEntityIds.length > 0 ? runtime.haClient.turn(state, 'switch', switchEntityIds) : Promise.resolve(null),
-    ];
-    const results = await Promise.allSettled(tasks);
-    const lightResult = results[0];
-    const switchResult = results[1];
-    const buildResults = (entityIds: string[], domainName: 'light' | 'switch', settled: PromiseSettledResult<unknown>) => entityIds.map((entityId) => {
+
+    const results = await Promise.allSettled([
+      ...lightEntityIds.map((entityId) => state === 'on'
+        ? runtime.tools.turn_on_light({ entity_id: entityId })
+        : runtime.tools.turn_off_light({ entity_id: entityId })),
+      ...switchEntityIds.map((entityId) => state === 'on'
+        ? runtime.tools.turn_on_switch({ entity_id: entityId })
+        : runtime.tools.turn_off_switch({ entity_id: entityId })),
+    ]);
+
+    const compactResults = results.map((settled, index) => {
+      const entityId = index < lightEntityIds.length ? lightEntityIds[index] : switchEntityIds[index - lightEntityIds.length];
+      const domainName = index < lightEntityIds.length ? 'light' : 'switch';
       if (settled.status === 'fulfilled') {
         return { success: true, data: { entity_id: entityId, action: state === 'on' ? 'turn_on' : 'turn_off', state_after: state, domain: domainName }, error: null };
       }
       return fail('SERVICE_FAILED', settled.reason instanceof Error ? settled.reason.message : String(settled.reason), { entity_id: entityId, domain: domainName });
     });
-    const compactResults = [
-      ...buildResults(lightEntityIds, 'light', lightResult),
-      ...buildResults(switchEntityIds, 'switch', switchResult),
-    ];
 
     return wrapToolResult(resultFrom({
       state,
       room: room ?? null,
+      keyword: searchKeyword ?? null,
       total: uniqueTargets.length,
       results: compactResults,
     }));

@@ -76,7 +76,15 @@ export class LightRegistry {
       const areaHit = device.area_name && normalizeText(device.area_name).includes(normalizedQuery) ? 1 : 0;
       const climateBoost = temperatureIntent ? ((device.domain === 'climate' || device.supports_temperature) ? 200 : -80) : 0;
       const lightBoost = brightnessIntent ? ((device.domain === 'light' && device.supports_brightness) ? 160 : device.domain === 'light' ? 80 : -40) : 0;
-      const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + climateBoost + lightBoost + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
+      const indicatorPenalty = /指示灯|开关|indicator|not room light|不是房间灯/.test(normalizedQuery)
+        ? 0
+        : /指示灯|indicator|开关/.test(joined)
+          ? -120
+          : 0;
+      const antiStripPenalty = /灯带|灯条|strip/.test(normalizedQuery)
+        ? (/指示灯|开关/.test(joined) ? -200 : 0)
+        : 0;
+      const score = (exactMatch ? 100 : 0) + tokenHits * 20 + aliasHits * 15 + roomHit * 10 + areaHit * 10 + climateBoost + lightBoost + indicatorPenalty + antiStripPenalty + Math.min(joined.includes(normalizedQuery) ? 10 : 0, 10);
       return { device, score };
     });
 

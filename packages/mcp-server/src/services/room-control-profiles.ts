@@ -1,15 +1,41 @@
 import type { LightDevice, RoomControlProfile } from '../models/types.js';
 
 const unique = (values: string[]) => Array.from(new Set(values));
+const normalize = (value: string) => value.toLowerCase().replace(/[\s_\-]+/g, ' ').trim();
+
+const profileNames = (profile: RoomControlProfile) => [
+  profile.main_light.display_name,
+  ...(profile.main_light.aliases ?? []),
+  profile.area_id,
+].filter((value): value is string => typeof value === 'string' && value.length > 0);
 
 export const findMainLightProfile = (
   profiles: RoomControlProfile[],
-  device: Pick<LightDevice, 'entity_id' | 'area_id' | 'room'>,
+  device: Pick<LightDevice, 'entity_id' | 'area_id' | 'room' | 'display_name' | 'aliases' | 'friendly_name'>,
 ) => {
   const areaId = device.area_id ?? device.room;
-  return profiles.find((profile) =>
-    profile.area_id === areaId && profile.main_light.member_entity_ids.includes(device.entity_id),
+  const entityMatch = profiles.find((profile) => profile.main_light.member_entity_ids.includes(device.entity_id));
+  if (entityMatch) return entityMatch;
+
+  if (areaId) {
+    const areaMatch = profiles.find((profile) => profile.area_id === areaId);
+    if (areaMatch) return areaMatch;
+  }
+
+  const candidateText = normalize([
+    device.display_name,
+    device.friendly_name ?? '',
+    ...device.aliases,
+    device.room ?? '',
+    device.area_id ?? '',
+  ].filter(Boolean).join(' '));
+
+  const nameMatch = profiles.find((profile) =>
+    profileNames(profile).some((name) => candidateText.includes(normalize(name))),
   );
+  if (nameMatch) return nameMatch;
+
+  return undefined;
 };
 
 export const getLightControlEntityIds = (profiles: RoomControlProfile[], device: LightDevice) => {
