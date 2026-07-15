@@ -3,11 +3,12 @@ import {
   listLightsInputSchema,
   resolveLightInputSchema,
   setLightBrightnessInputSchema,
+  setLightColorTempInputSchema,
   setLightStateInputSchema,
   turnOffLightInputSchema,
   turnOnLightInputSchema,
 } from '../models/schemas.js';
-import type { LightDevice, RoomControlProfile, ToolResponse } from '../models/types.js';
+import type { DeviceCapability, LightDevice, RoomControlProfile, ToolResponse } from '../models/types.js';
 import { fail, ok } from '../utils/result.js';
 import type { AuditLogger } from '../services/audit-logger.js';
 import type { HaClient } from '../services/ha-client.js';
@@ -54,7 +55,7 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
           type: 'light' as const,
           enabled: true,
           supports_brightness: true,
-          capabilities: ['turn_on', 'turn_off', 'get_state', 'set_brightness'],
+          capabilities: ['turn_on', 'turn_off', 'get_state', 'set_brightness', 'set_color_temp'] as DeviceCapability[],
           risk_level: 'low' as const,
           capability_source: 'home_assistant' as const,
         },
@@ -209,14 +210,27 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
 
     const plan = resolvePlan(resolved.device);
     const controllableEntityIds = plan.entityIds.filter((memberEntityId) => {
-      if (brightness === undefined) return true;
       const member = registry.getByEntityId(memberEntityId);
       if (!member) return memberEntityId.startsWith('light.');
-      const policyCheck = policy.canSetBrightness(member, brightness);
-      return policyCheck.allowed;
+
+      if (brightness !== undefined) {
+        const policyCheck = policy.canSetBrightness(member, brightness);
+        return policyCheck.allowed;
+      }
+
+      if (colorTempKelvin !== undefined) {
+        return Boolean(member.supported_color_modes?.includes('color_temp') || member.capabilities.includes('set_color_temp'));
+      }
+
+      return true;
     });
+
     if (controllableEntityIds.length === 0) {
-      return fail('BRIGHTNESS_NOT_SUPPORTED', '没有可控制亮度的灯光成员', { entity_id: entityId, member_entity_ids: plan.entityIds });
+      return fail(
+        colorTempKelvin === undefined ? 'BRIGHTNESS_NOT_SUPPORTED' : 'COLOR_TEMP_NOT_SUPPORTED',
+        colorTempKelvin === undefined ? '没有可控制亮度的灯光成员' : '没有可控制色温的灯光成员',
+        { entity_id: entityId, member_entity_ids: plan.entityIds },
+      );
     }
 
     const powerResult = await ensurePowerSwitchOn(plan.powerSwitchEntityId);
@@ -228,9 +242,9 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
     const confirmed = { confirmed: true as const, states: controllableEntityIds.map(() => ({ state: 'on' })) };
     const primaryState = confirmed.states[0] ?? { state: 'on' };
     const memberStates = toMemberStates(controllableEntityIds, confirmed.states);
-    const action = brightness === undefined ? 'set_color_temp' : 'set_brightness';
+    const action = brightness !== undefined ? 'set_brightness' : colorTempKelvin !== undefined ? 'set_color_temp' : 'turn_on';
 
-    await audit(confirmed.confirmed, action === 'set_brightness' ? 'set_light_brightness' : 'set_light_state', {
+    await audit(confirmed.confirmed, action === 'set_brightness' ? 'set_light_brightness' : action === 'set_color_temp' ? 'set_light_color_temp' : 'set_light_state', {
       entity_id: entityId,
       member_entity_ids: controllableEntityIds,
       skipped_member_entity_ids: plan.entityIds.filter((memberEntityId) => !controllableEntityIds.includes(memberEntityId)),
@@ -345,6 +359,11 @@ export const createLightTools = ({ registry, policy, haClient, auditLogger, room
     async set_light_brightness(input: unknown) {
       const parsed = setLightBrightnessInputSchema.parse(input);
       return setLightLevel(parsed.entity_id, Math.max(0, Math.min(255, Math.round(parsed.brightness))));
+    },
+
+    async set_light_color_temp(input: unknown) {
+      const parsed = setLightColorTempInputSchema.parse(input);
+      return setLightLevel(parsed.entity_id, undefined, parsed.color_temp_kelvin);
     },
 
     async set_light_state(input: unknown) {

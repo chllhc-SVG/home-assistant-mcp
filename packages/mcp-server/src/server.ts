@@ -213,8 +213,8 @@ export const createServer = ({ audit, registry, tools, haClient, whitelistStore,
             device_name: snapshot?.device_name,
             domain,
             room: snapshot?.area_name ?? '',
-            area_id: snapshot?.area_id,
-            area_name: snapshot?.area_name,
+            area_id: snapshot?.area_id ?? undefined,
+            area_name: snapshot?.area_name ?? undefined,
             enabled: true,
           };
         });
@@ -293,6 +293,15 @@ export const createServer = ({ audit, registry, tools, haClient, whitelistStore,
       res.json(result);
     } catch (error) {
       res.status(error instanceof HomeAssistantError && error.code === 'AUTH_FAILED' ? 401 : 400).json(failFromError('设置灯光亮度失败', error));
+    }
+  });
+
+  app.post('/api/control/lights/:entityId/color-temp', async (req, res) => {
+    try {
+      const result = await tools.set_light_color_temp({ entity_id: req.params.entityId, color_temp_kelvin: Number(req.body?.color_temp_kelvin) });
+      res.json(result);
+    } catch (error) {
+      res.status(error instanceof HomeAssistantError && error.code === 'AUTH_FAILED' ? 401 : 400).json(failFromError('设置灯光色温失败', error));
     }
   });
 

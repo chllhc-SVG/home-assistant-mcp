@@ -58,16 +58,16 @@ export const setLightBrightnessInputSchema = z.object({
   brightness: brightnessSchema,
 });
 
+export const setLightColorTempInputSchema = z.object({
+  entity_id: z.string().min(1),
+  color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000),
+});
+
 export const setLightStateInputSchema = z.object({
   entity_id: z.string().min(1),
   state: z.enum(['on', 'off']),
   brightness: brightnessSchema.optional(),
   color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000).optional(),
-});
-
-export const setLightColorTempInputSchema = z.object({
-  entity_id: z.string().min(1),
-  color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000),
 });
 
 export const pressButtonInputSchema = z.object({
