@@ -43,14 +43,14 @@ const registerTools = (server: McpServer, runtime: Runtime) => {
 
   server.tool(
     'control_device',
-    'Control a Home Assistant device. For lights and switches use turn_on/turn_off. For climate devices use set_temperature, set_hvac_mode, set_fan_mode, or set_swing_mode.',
+    'Control a Home Assistant device. Use registry/whitelist lookups first and prefer exact entity or device name matches. Use switch controls for main lights, downlights, and light strips. Use climate controls for temperature. Only use set_all_lights_state when the user explicitly asks to control all lights or all switches explicitly.',
     controlDeviceInputSchema.shape,
     async (input) => dispatchTool(runtime, 'control_device', input),
   );
 
   server.tool(
     'set_all_lights_state',
-    '批量控制所有灯光或指定房间内的灯光与灯型开关。',
+    '批量控制所有灯光或所有开关。仅用于明确请求全部设备的统一开关控制时，不要用于单个主灯、筒灯或灯带。',
     z.object({
       state: z.enum(['on', 'off']),
       room: z.string().optional(),

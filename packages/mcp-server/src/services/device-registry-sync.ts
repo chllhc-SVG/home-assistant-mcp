@@ -11,7 +11,7 @@ const toDevice = (record: WhitelistRecord, snapshot?: HaSnapshot): LightDevice =
   return {
     device_id: snapshot?.device_id ?? record.device_id ?? record.entity_id,
     display_name: snapshot?.device_name ?? snapshot?.friendly_name ?? record.display_name ?? record.entity_id,
-    aliases: [],
+    aliases: [snapshot?.device_name, snapshot?.friendly_name, record.display_name, record.friendly_name, record.device_name].filter((value): value is string => Boolean(value)),
     entity_id: record.entity_id,
     domain,
     room: snapshot ? snapshot.area_name ?? '' : record.room,
@@ -71,21 +71,24 @@ export const hydrateRegistryFromHomeAssistant = async ({
 }) => {
   const [records, snapshots] = await Promise.all([whitelistStore.list(), haClient.discoverEntities()]);
   const recordsByEntityId = new Map(records.map((record) => [record.entity_id, record]));
-  const devices = snapshots.map((snapshot) => {
-    const record = recordsByEntityId.get(snapshot.entity_id);
-    return toDevice({
-      entity_id: snapshot.entity_id,
-      display_name: snapshot.device_name ?? snapshot.friendly_name ?? snapshot.entity_id,
-      friendly_name: snapshot.friendly_name,
-      device_id: snapshot.device_id ?? snapshot.entity_id,
-      device_name: snapshot.device_name,
-      domain: (snapshot.domain ?? snapshot.entity_id.split('.')[0]) as WhitelistRecord['domain'],
-      room: snapshot.area_name ?? '',
-      area_id: snapshot.area_id,
-      area_name: snapshot.area_name,
-      enabled: record?.enabled ?? true,
-    }, snapshot);
-  });
+  const devices = snapshots
+    .map((snapshot) => {
+      const record = recordsByEntityId.get(snapshot.entity_id);
+      if (!record) return undefined;
+      return toDevice({
+        entity_id: snapshot.entity_id,
+        display_name: snapshot.device_name ?? snapshot.friendly_name ?? snapshot.entity_id,
+        friendly_name: snapshot.friendly_name,
+        device_id: snapshot.device_id ?? snapshot.entity_id,
+        device_name: snapshot.device_name,
+        domain: (snapshot.domain ?? snapshot.entity_id.split('.')[0]) as WhitelistRecord['domain'],
+        room: snapshot.area_name ?? '',
+        area_id: snapshot.area_id ?? undefined,
+        area_name: snapshot.area_name ?? undefined,
+        enabled: record.enabled,
+      }, snapshot);
+    })
+    .filter((device): device is LightDevice => Boolean(device));
 
   registry.setExposure(records.filter((record) => record.enabled).map((record) => record.entity_id));
   registry.replace(devices);
@@ -119,10 +122,12 @@ export const syncDeviceRegistryFromHomeAssistant = async ({
       device_name: snapshot?.device_name ?? record.device_name,
       domain: device.domain,
       room: device.room,
-      area_id: snapshot ? snapshot.area_id : record.area_id,
-      area_name: snapshot ? snapshot.area_name : record.area_name,
+      area_id: snapshot ? snapshot.area_id ?? undefined : record.area_id ?? undefined,
+      area_name: snapshot ? snapshot.area_name ?? undefined : record.area_name ?? undefined,
       enabled: record.enabled,
       ha_synced_at: syncedAt,
+      created_at: record.created_at,
+      updated_at: record.updated_at,
     };
   }));
 

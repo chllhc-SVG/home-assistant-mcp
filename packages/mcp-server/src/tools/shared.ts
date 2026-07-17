@@ -48,6 +48,13 @@ export const buildStateSummary = (state: Record<string, unknown>): StateSummary 
 export const hasExpectedPowerState = (summary: StateSummary, action: 'on' | 'off') =>
   summary.state_after === action;
 
+export const confirmExpectedState = async (
+  readState: () => Promise<Record<string, unknown>>,
+  expected: 'on' | 'off',
+  retries = 2,
+  delayMs = 180,
+) => waitForExpectedPowerState(readState, expected, retries, delayMs);
+
 export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const waitForExpectedPowerState = async (

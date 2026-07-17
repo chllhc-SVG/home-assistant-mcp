@@ -4,6 +4,7 @@ import type { LightDevice } from './models/types.js';
 import { controlDeviceInputSchema, listDevicesInputSchema } from './models/schemas.js';
 import { fail } from './utils/result.js';
 import { getLightControlKey } from './services/room-control-profiles.js';
+import { classifyControlIntent, classifyRoute, executeLightControl, executePowerControl, resolveWhitelistEntity } from './services/control-routing.js';
 
 type JsonRpcId = string | number | null;
 
@@ -43,16 +44,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 
 const CLIMATE_KEYWORD_PATTERN = /空调|温度|制冷|制热|恒温|温控|度/;
 
-const shouldIncludeDevice = (device: LightDevice, filter: { domain?: string; room?: string; keyword?: string }) => {
+const shouldIncludeDevice = (device: LightDevice, filter: { domain?: string; keyword?: string }) => {
   if (filter.domain && device.domain !== filter.domain) return false;
-  if (filter.room && device.room !== filter.room && device.area_name !== filter.room) return false;
   if (!filter.keyword) return true;
   const keyword = filter.keyword.toLowerCase();
   return [
     device.display_name,
     device.entity_id,
-    device.room,
-    device.area_name ?? '',
     device.friendly_name ?? '',
     ...device.aliases,
   ].filter(Boolean).some((value) => value.toLowerCase().includes(keyword));
@@ -63,78 +61,50 @@ const mergeUniqueDevices = (devices: LightDevice[]) => devices.reduce<LightDevic
   return acc;
 }, []);
 
-const findMainLightProfile = (runtime: Runtime, room?: string) => {
-  if (!room) return runtime.config.roomControlProfiles[0];
+const findMainLightProfile = (runtime: Runtime) => runtime.config.roomControlProfiles[0];
 
-  const normalizedRoom = room.toLowerCase().replace(/[\s_\-]+/g, ' ').trim();
-  const matched = runtime.config.roomControlProfiles.find((profile) => {
-    const names = [profile.area_id, profile.main_light.display_name, ...(profile.main_light.aliases ?? [])]
-      .filter((value): value is string => typeof value === 'string' && value.length > 0)
-      .map((value) => value.toLowerCase().replace(/[\s_\-]+/g, ' ').trim());
-    return names.some((name) => name.includes(normalizedRoom) || normalizedRoom.includes(name));
-  });
-  return matched ?? runtime.config.roomControlProfiles[0];
-};
-
-const getClimateCandidates = (runtime: Runtime, filter: { room?: string; keyword?: string } = {}) => mergeUniqueDevices([
-  ...runtime.registry.list({ domain: 'climate', room: filter.room, keyword: filter.keyword, enabledOnly: true }),
-  ...(cachedDiscoveredDevices?.devices.filter((device) => shouldIncludeDevice(device, { domain: 'climate', room: filter.room, keyword: filter.keyword })) ?? []),
+const getClimateCandidates = (runtime: Runtime, filter: { keyword?: string } = {}) => mergeUniqueDevices([
+  ...runtime.registry.list({ domain: 'climate', keyword: filter.keyword, enabledOnly: true }),
 ]).map((device): LightDevice => ({
   ...device,
   supports_temperature: true,
   capabilities: Array.from(new Set([...device.capabilities, 'set_temperature'])),
 }));
 
-const resolveClimateDevice = (runtime: Runtime, filter: { room?: string; keyword?: string } = {}) => {
+const resolveClimateDevice = (runtime: Runtime, filter: { keyword?: string } = {}) => {
   const candidates = getClimateCandidates(runtime, filter);
-  if (candidates.length > 0) return candidates[0];
-  return runtime.registry.list({ domain: 'climate', enabledOnly: true })[0] ?? cachedDiscoveredDevices?.devices.find((device) => device.domain === 'climate');
+  return candidates[0];
 };
 
-let cachedDiscoveredDevices: { expiresAt: number; devices: LightDevice[] } | undefined;
+const resolveDeviceFromWhitelist = (runtime: Runtime, params: { entityId?: string; deviceName?: string; keyword?: string; intent?: string }) => {
+  const { entityId, deviceName, keyword, intent } = params;
+  if (entityId) {
+    const byId = runtime.registry.getByEntityId(entityId);
+    if (byId) return byId;
+  }
 
-export const warmMcpDiscoveryCache = async (runtime: Runtime) => {
-  const nowMs = Date.now();
-  const devices = await runtime.haClient.discoverEntities().then((entities) => entities.map((entity): LightDevice => ({
-    device_id: entity.device_id ?? entity.entity_id,
-    display_name: entity.device_name ?? entity.friendly_name ?? entity.entity_id,
-    aliases: [entity.device_name, entity.friendly_name, entity.area_name, entity.device_model].filter((value): value is string => Boolean(value)),
-    entity_id: entity.entity_id,
-    domain: (entity.domain ?? entity.entity_id.split('.')[0]) as LightDevice['domain'],
-    room: entity.area_name ?? '',
-    area_id: entity.area_id,
-    area_name: entity.area_name,
-    type: (entity.domain ?? entity.entity_id.split('.')[0]) as LightDevice['domain'],
-    state: entity.state,
-    friendly_name: entity.friendly_name,
-    enabled: true,
-    supports_brightness: entity.supports_brightness,
-    supports_value: entity.supports_value,
-    supports_temperature: entity.domain === 'climate' ? true : entity.supports_temperature,
-    supports_hvac_mode: entity.supports_hvac_mode,
-    supports_fan_mode: entity.supports_fan_mode,
-    supports_swing_mode: entity.supports_swing_mode,
-    supported_color_modes: entity.supported_color_modes,
-    color_mode: entity.color_mode,
-    brightness: entity.brightness,
-    temperature_min: entity.temperature_min,
-    temperature_max: entity.temperature_max,
-    temperature_step: entity.temperature_step,
-    temperature_unit: entity.temperature_unit,
-    current_temperature: entity.current_temperature,
-    target_temperature: entity.target_temperature,
-    hvac_mode: entity.hvac_mode,
-    hvac_modes: entity.hvac_modes,
-    fan_mode: entity.fan_mode,
-    fan_modes: entity.fan_modes,
-    swing_mode: entity.swing_mode,
-    swing_modes: entity.swing_modes,
-    capabilities: entity.domain === 'climate' ? ['get_state', 'set_temperature'] : ['get_state'],
-    risk_level: entity.domain === 'climate' ? 'medium' : 'low',
-    capability_source: 'home_assistant',
-  })));
-  cachedDiscoveredDevices = { devices, expiresAt: nowMs + 60_000 };
-  return devices.length;
+  const searchTerms = [deviceName, intent, keyword].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  for (const term of searchTerms) {
+    const direct = runtime.registry.resolve(term, { domain: undefined }).find((device) => device.display_name === term || device.friendly_name === term || device.entity_id === term);
+    if (direct) return direct;
+  }
+
+  const domainHint = (() => {
+    const text = searchTerms.join(' ').toLowerCase();
+    if (/空调|温度|制冷|制热|恒温|温控/.test(text)) return 'climate' as const;
+    if (/筒灯|灯带|灯条|主灯|switch|toggle|turn on|turn off|开|关|打开|关闭/.test(text)) return 'switch' as const;
+    if (/亮度|灯光|变亮|变暗|调亮|调暗/.test(text)) return 'light' as const;
+    return undefined;
+  })();
+
+  for (const term of searchTerms) {
+    const candidates = domainHint
+      ? runtime.registry.resolve(term, { domain: domainHint })
+      : runtime.registry.resolve(term, {});
+    if (candidates.length === 1) return candidates[0];
+  }
+
+  return undefined;
 };
 
 export const mcpTools: McpTool[] = [
@@ -419,23 +389,24 @@ const writeMcpCallAudit = (
   });
 };
 
-const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<string, unknown>) => {
+type McpToolResult = ReturnType<typeof wrapToolResult>;
+
+const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<string, unknown>): Promise<McpToolResult> => {
   if (name === 'list_devices') {
     const parsed = listDevicesInputSchema.parse(params);
 
     const domain = readString(parsed.domain);
-    const room = readString(parsed.room);
     const keyword = readString(parsed.keyword);
     const enabledOnly = readBoolean(parsed.enabled_only) !== false;
 
-    const baseFilter = { room, keyword, enabledOnly };
+    const baseFilter = { keyword, enabledOnly };
     const temperatureIntent = keyword ? CLIMATE_KEYWORD_PATTERN.test(keyword) : false;
     const registryDevices = domain
       ? runtime.registry.list({ ...baseFilter, domain })
       : temperatureIntent
-        ? [...getClimateCandidates(runtime, { room, keyword }), ...runtime.registry.list({ ...baseFilter, domain: 'light' }), ...runtime.registry.list({ ...baseFilter, domain: 'switch' })]
-        : [...runtime.registry.list({ ...baseFilter, domain: 'light' }), ...runtime.registry.list({ ...baseFilter, domain: 'switch' }), ...getClimateCandidates(runtime, { room, keyword })];
-    const cachedDevices = cachedDiscoveredDevices?.devices.filter((device) => shouldIncludeDevice(device, { domain, room, keyword })) ?? [];
+        ? [...getClimateCandidates(runtime, { keyword }), ...runtime.registry.list({ ...baseFilter, domain: 'light' }), ...runtime.registry.list({ ...baseFilter, domain: 'switch' })]
+        : [...runtime.registry.list({ ...baseFilter, domain: 'light' }), ...runtime.registry.list({ ...baseFilter, domain: 'switch' }), ...getClimateCandidates(runtime, { keyword })];
+    const cachedDevices = cachedDiscoveredDevices?.devices.filter((device) => shouldIncludeDevice(device, { domain, keyword })) ?? [];
     const devices = mergeUniqueDevices([...registryDevices, ...cachedDevices]);
 
     const uniqueDevices = devices.sort((a, b) => {
@@ -453,125 +424,96 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
 
   if (name === 'control_device') {
     const parsed = controlDeviceInputSchema.parse(params);
-    const entityId = parsed.entity_id;
-    const domain = entityId.split('.')[0];
-    const normalizedIntent = [entityId, parsed.action, readString(params.room), readString(params.keyword), readString(params.name)]
+    const keyword = readString(params.keyword);
+    const intent = [parsed.entity_id, parsed.device_name, parsed.action, keyword, readString(params.name)]
       .filter((value): value is string => typeof value === 'string' && value.length > 0)
-      .join(' ')
-      .toLowerCase()
-      .replace(/[\s_\-]+/g, ' ');
-    const mainLightIntent = /主灯|main light|mainlight|调亮|变亮|调暗|亮度|灯光/.test(normalizedIntent);
-    const stripIntent = /灯带|灯条|strip/.test(normalizedIntent);
-    const isIndicatorStyleLight = /指示灯|开关|indicator/.test(normalizedIntent);
+      .join(' ');
+    const classification = classifyControlIntent(intent);
+    const route = classifyRoute(classification, parsed.action);
+    const resolvedDevice = resolveWhitelistEntity(runtime, {
+      entityId: parsed.entity_id,
+      deviceName: parsed.device_name,
+      keyword,
+      intent: classification.normalizedIntent,
+    });
+    const resolvedEntityId = resolvedDevice?.entity_id ?? parsed.entity_id ?? parsed.device_name ?? '';
 
-    if (parsed.action === 'set_brightness' && mainLightIntent) {
-      return wrapToolResult(resultFrom(await dispatchToolCore(runtime, 'set_main_light_brightness', {
-        brightness: parsed.brightness ?? 0,
-        room: readString(params.room),
-        keyword: readString(params.keyword),
+    if (route === 'main_light_brightness') {
+      if (!resolvedDevice) {
+        return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到白名单中的主灯设备', { entity_id: resolvedEntityId, keyword, action: parsed.action }), true);
+      }
+      if (resolvedDevice.domain !== 'light') {
+        return wrapToolResult(fail('DEVICE_NOT_FOUND', '主灯亮度控制必须匹配 light 实体', { entity_id: resolvedEntityId, domain: resolvedDevice.domain }), true);
+      }
+      return wrapToolResult(resultFrom(await executeLightControl(runtime, parsed.action === 'turn_off' ? 'turn_off' : 'turn_on', resolvedDevice)));
+    }
+
+    if (route === 'climate') {
+      if (!resolvedDevice) {
+        return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到白名单中的空调设备', { entity_id: resolvedEntityId, keyword, action: parsed.action }), true);
+      }
+      if (resolvedDevice.domain !== 'climate') {
+        return wrapToolResult(fail('DEVICE_NOT_FOUND', '空调控制必须匹配 climate 实体', { entity_id: resolvedEntityId, domain: resolvedDevice.domain }), true);
+      }
+      return wrapToolResult(resultFrom(await dispatchToolCore(runtime, 'set_default_air_conditioner_temperature', {
+        temperature: parsed.temperature ?? 0,
+        keyword: keyword ?? '空调',
+        device_name: resolvedDevice.display_name,
+        entity_id: resolvedDevice.entity_id,
       })));
     }
 
-    if (parsed.action === 'turn_on' || parsed.action === 'turn_off') {
-      const preferredSwitchCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'switch' })
-        .filter((device) => /主灯|灯带|灯条|筒灯|strip|downlight|light/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
-      const preferredSwitchTarget = preferredSwitchCandidates[0];
-
-      if (preferredSwitchTarget && preferredSwitchTarget.entity_id !== entityId && (/主灯|灯带|灯条|筒灯|strip|downlight/.test(normalizedIntent) || domain === 'light')) {
-        return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
-          ? runtime.tools.turn_on_switch({ entity_id: preferredSwitchTarget.entity_id })
-          : runtime.tools.turn_off_switch({ entity_id: preferredSwitchTarget.entity_id }))));
+    if (route === 'switch_power') {
+      if (!resolvedDevice) {
+        return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到白名单中的目标设备', { entity_id: resolvedEntityId, keyword, action: parsed.action }), true);
       }
-
-      const stripCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'switch' })
-        .filter((device) => /灯带|灯条|strip/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
-      const stripTarget = stripIntent ? stripCandidates[0] : undefined;
-
-      if (stripTarget && stripTarget.entity_id !== entityId) {
-        return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
-          ? runtime.tools.turn_on_switch({ entity_id: stripTarget.entity_id })
-          : runtime.tools.turn_off_switch({ entity_id: stripTarget.entity_id }))));
+      if ((parsed.action === 'turn_on' || parsed.action === 'turn_off') && resolvedDevice.domain === 'switch') {
+        return wrapToolResult(resultFrom(await executePowerControl(runtime, parsed.action, resolvedDevice)));
       }
-
-      if (stripIntent && isIndicatorStyleLight) {
-        const lightCandidates = runtime.registry.resolve(readString(params.keyword) ?? entityId, { domain: 'light' })
-          .filter((device) => !/指示灯|开关|indicator/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase()));
-        const fallbackTarget = lightCandidates.find((device) => /灯带|灯条|strip/.test([device.display_name, device.entity_id, device.friendly_name ?? '', ...device.aliases].join(' ').toLowerCase())) ?? lightCandidates[0];
-        if (fallbackTarget && fallbackTarget.entity_id !== entityId) {
-          return wrapToolResult(resultFrom(await (parsed.action === 'turn_on'
-            ? runtime.tools.turn_on_light({ entity_id: fallbackTarget.entity_id })
-            : runtime.tools.turn_off_light({ entity_id: fallbackTarget.entity_id }))));
-        }
-      }
+      return wrapToolResult(fail('DEVICE_NOT_FOUND', '当前仅允许通过白名单中的 switch 执行主灯/筒灯/灯带控制', { entity_id: resolvedEntityId, keyword, action: parsed.action, domain: resolvedDevice.domain }), true);
     }
 
-    switch (parsed.action) {
-      case 'turn_on':
-        return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_on_switch({ entity_id: entityId }) : runtime.tools.turn_on_light({ entity_id: entityId }))));
-      case 'turn_off':
-        return wrapToolResult(resultFrom(await (domain === 'switch' ? runtime.tools.turn_off_switch({ entity_id: entityId }) : runtime.tools.turn_off_light({ entity_id: entityId }))));
-      case 'press':
-        return wrapToolResult(resultFrom(await runtime.tools.press_button({ entity_id: entityId })));
-      case 'set_brightness':
-        return wrapToolResult(resultFrom(await runtime.tools.set_light_brightness({ entity_id: entityId, brightness: parsed.brightness ?? 0 })));
-      case 'set_color_temp':
-        return wrapToolResult(resultFrom(await runtime.tools.set_light_state({ entity_id: entityId, state: 'on', color_temp_kelvin: parsed.color_temp_kelvin ?? 4000 })));
-      case 'set_value':
-        return wrapToolResult(resultFrom(await runtime.tools.set_number_value({ entity_id: entityId, value: parsed.value ?? 0 })));
-      case 'set_temperature':
-        return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ entity_id: entityId, temperature: parsed.temperature ?? 0 })));
-      case 'set_hvac_mode':
-        return wrapToolResult(resultFrom(await runtime.tools.set_climate_hvac_mode({ entity_id: entityId, hvac_mode: parsed.hvac_mode ?? 'auto' })));
-      case 'set_fan_mode':
-        return wrapToolResult(resultFrom(await runtime.tools.set_climate_fan_mode({ entity_id: entityId, fan_mode: parsed.fan_mode ?? '' })));
-      case 'set_swing_mode':
-        return wrapToolResult(resultFrom(await runtime.tools.set_climate_swing_mode({ entity_id: entityId, swing_mode: parsed.swing_mode ?? '' })));
-      default:
-        return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported action for ${domain}`, { entity_id: entityId, action: parsed.action }), true);
-    }
+    return wrapToolResult(fail('INVALID_ARGUMENT', `Unsupported or ambiguous action for ${resolvedDevice?.domain ?? 'unknown'}`, { entity_id: resolvedEntityId, action: parsed.action }), true);
   }
 
   if (name === 'turn_on_main_light' || name === 'turn_off_main_light') {
-    const profile = findMainLightProfile(runtime, readString(params.room));
-    const powerSwitchEntityId = profile?.main_light.power_switch_entity_id;
-    if (!profile || !powerSwitchEntityId) {
-      return wrapToolResult(fail('DEVICE_NOT_FOUND', '未配置主灯开关', { room: readString(params.room) }), true);
+    const keyword = readString(params.keyword) ?? readString(params.device_name) ?? '主灯';
+    const target = resolveDeviceFromWhitelist(runtime, { keyword, deviceName: readString(params.device_name), entityId: readString(params.entity_id), intent: keyword });
+    if (!target || target.domain !== 'switch') {
+      return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到白名单中的主灯开关', { keyword }), true);
     }
 
     const desired = name === 'turn_on_main_light' ? 'on' : 'off';
     const result = desired === 'on'
-      ? await runtime.tools.turn_on_switch({ entity_id: powerSwitchEntityId })
-      : await runtime.tools.turn_off_switch({ entity_id: powerSwitchEntityId });
+      ? await runtime.tools.turn_on_switch({ entity_id: target.entity_id })
+      : await runtime.tools.turn_off_switch({ entity_id: target.entity_id });
     return wrapToolResult(resultFrom({
       success: true,
       action: desired === 'on' ? 'turn_on' : 'turn_off',
-      entity_id: powerSwitchEntityId,
-      main_light: profile.main_light.display_name,
-      member_entity_ids: profile.main_light.member_entity_ids,
-      control_strategy: 'power_switch_direct',
+      entity_id: target.entity_id,
+      main_light: target.display_name,
+      member_entity_ids: [],
+      control_strategy: 'whitelist_switch_direct',
       result,
     }));
   }
 
   if (name === 'set_main_light_brightness') {
     const brightness = typeof params.brightness === 'number' ? Math.max(0, Math.min(255, Math.round(params.brightness))) : undefined;
-    const room = readString(params.room);
-    const keyword = readString(params.keyword);
-    const profile = findMainLightProfile(runtime, room ?? keyword);
-    if (!profile || brightness === undefined) {
-      return wrapToolResult(fail('INVALID_ARGUMENT', '缺少主灯配置或亮度参数', { room, keyword, brightness: params.brightness }), true);
+    const keyword = readString(params.keyword) ?? readString(params.device_name) ?? '主灯';
+    const target = resolveDeviceFromWhitelist(runtime, { keyword, deviceName: readString(params.device_name), entityId: readString(params.entity_id), intent: `${keyword} 亮度` });
+    if (!target || brightness === undefined || target.domain !== 'light') {
+      return wrapToolResult(fail('INVALID_ARGUMENT', '缺少主灯白名单设备或亮度参数', { keyword, brightness: params.brightness }), true);
     }
 
-    const results = await Promise.all(profile.main_light.member_entity_ids.map((entityId) =>
-      runtime.tools.set_light_brightness({ entity_id: entityId, brightness }),
-    ));
+    const results = await Promise.all([runtime.tools.set_light_brightness({ entity_id: target.entity_id, brightness })]);
     return wrapToolResult(resultFrom({
       success: true,
       action: 'set_brightness',
       brightness,
-      main_light: profile.main_light.display_name,
-      member_entity_ids: profile.main_light.member_entity_ids,
-      control_strategy: 'main_light_members_direct',
+      main_light: target.display_name,
+      member_entity_ids: [target.entity_id],
+      control_strategy: 'whitelist_light_direct',
       results,
     }));
   }
@@ -582,10 +524,10 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
       return wrapToolResult(fail('INVALID_ARGUMENT', 'state must be on or off', { state }), true);
     }
 
-    const room = readString(params.room);
     const searchKeyword = readString(params.keyword);
-    const devices = runtime.registry.list({ domain: 'light', room, keyword: searchKeyword, enabledOnly: true });
-    const switchDevices = runtime.registry.list({ domain: 'switch', room, keyword: searchKeyword, enabledOnly: true });
+
+    const devices = runtime.registry.list({ domain: 'light', keyword: searchKeyword, enabledOnly: true });
+    const switchDevices = runtime.registry.list({ domain: 'switch', keyword: searchKeyword, enabledOnly: true });
     const targets = [...devices, ...switchDevices];
     const uniqueTargets = targets.reduce<typeof targets>((acc, device) => {
       const targetKey = device.domain === 'light'
@@ -623,7 +565,7 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
 
     return wrapToolResult(resultFrom({
       state,
-      room: room ?? null,
+      room: null,
       keyword: searchKeyword ?? null,
       total: uniqueTargets.length,
       results: compactResults,
@@ -631,19 +573,19 @@ const dispatchToolCore = async (runtime: Runtime, name: string, params: Record<s
   }
 
   if (name === 'list_climate_devices') {
-    const devices = getClimateCandidates(runtime, { room: readString(params.room), keyword: readString(params.keyword) });
+    const devices = getClimateCandidates(runtime, { keyword: readString(params.keyword) });
     return wrapToolResult(resultFrom({ devices }));
   }
   if (name === 'get_climate_state') return wrapToolResult(resultFrom(await runtime.tools.get_climate_state(params)));
   if (name === 'set_climate_temperature') {
-    const entityId = readString(params.entity_id) ?? resolveClimateDevice(runtime, { room: readString(params.room), keyword: readString(params.keyword) })?.entity_id;
-    if (!entityId) return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到可调温的空调设备', { room: readString(params.room), keyword: readString(params.keyword) }), true);
-    return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ ...params, entity_id: entityId })));
+    const entityId = readString(params.entity_id) ?? resolveClimateDevice(runtime, { keyword: readString(params.keyword) ?? readString(params.device_name) })?.entity_id;
+    if (!entityId) return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到可调温的空调设备', { keyword: readString(params.keyword) ?? readString(params.device_name) }), true);
+    return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ temperature: params.temperature, entity_id: entityId })));
   }
   if (name === 'set_default_air_conditioner_temperature') {
-    const climateDevice = resolveClimateDevice(runtime, { room: readString(params.room), keyword: readString(params.keyword) ?? '空调' });
-    if (!climateDevice) return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到可调温的空调设备', { room: readString(params.room), keyword: readString(params.keyword) }), true);
-    return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ ...params, entity_id: climateDevice.entity_id })));
+    const climateDevice = resolveClimateDevice(runtime, { keyword: readString(params.keyword) ?? readString(params.device_name) ?? '空调' });
+    if (!climateDevice) return wrapToolResult(fail('DEVICE_NOT_FOUND', '未找到可调温的空调设备', { keyword: readString(params.keyword) ?? readString(params.device_name) }), true);
+    return wrapToolResult(resultFrom(await runtime.tools.set_climate_temperature({ temperature: params.temperature, entity_id: climateDevice.entity_id })));
   }
   if (name === 'set_climate_hvac_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_hvac_mode(params)));
   if (name === 'set_climate_fan_mode') return wrapToolResult(resultFrom(await runtime.tools.set_climate_fan_mode(params)));

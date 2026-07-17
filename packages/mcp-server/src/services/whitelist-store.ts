@@ -9,8 +9,8 @@ export interface WhitelistRecord {
   device_name?: string;
   domain: LightDevice['domain'];
   room: string;
-  area_id?: string;
-  area_name?: string;
+  area_id?: string | null;
+  area_name?: string | null;
   enabled: boolean;
   ha_synced_at?: string;
   updated_at: string;
@@ -18,6 +18,15 @@ export interface WhitelistRecord {
 }
 
 export type WhitelistUpsertRecord = Omit<WhitelistRecord, 'created_at' | 'updated_at'>;
+
+export interface WhitelistMatch {
+  record: WhitelistRecord;
+  score: number;
+  reason: string;
+}
+
+const normalizeText = (value: string) => value.toLowerCase().replace(/[\s_\-]+/g, ' ').trim();
+const tokenMatches = (haystack: string, query: string) => normalizeText(haystack).includes(normalizeText(query));
 
 export class WhitelistStore {
   private readonly pool: Pool;
@@ -112,4 +121,25 @@ export class WhitelistStore {
   }
 
   async close() { await this.pool.end(); }
+
+  async findBestMatch(query: string) {
+    const records = await this.list();
+    const enabledRecords = records.filter((record) => record.enabled);
+    const scored = enabledRecords.map((record) => {
+      const haystack = [record.entity_id, record.display_name, record.friendly_name ?? '', record.device_name ?? '', record.room, record.area_name ?? ''].join(' ');
+      const exact = normalizeText(haystack) === normalizeText(query) ? 120 : 0;
+      const directEntityId = normalizeText(record.entity_id) === normalizeText(query) ? 200 : 0;
+      const directName = [record.display_name, record.friendly_name ?? '', record.device_name ?? ''].some((value) => tokenMatches(value, query)) ? 80 : 0;
+      const roomHit = record.room && tokenMatches(record.room, query) ? 20 : 0;
+      const areaHit = record.area_name && tokenMatches(record.area_name, query) ? 20 : 0;
+      const contains = tokenMatches(haystack, query) ? 30 : 0;
+      const score = directEntityId + exact + directName + roomHit + areaHit + contains;
+      return { record, score, reason: `entity_id=${record.entity_id}` };
+    });
+
+    const top = scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
+    if (top.length === 0) return undefined;
+    if (top.length > 1 && top[0].score === top[1].score) return { ambiguous: true as const, matches: top.slice(0, 5) };
+    return { ambiguous: false as const, match: top[0] };
+  }
 }

@@ -24,8 +24,8 @@ export interface ControllableDevice {
   entity_id: string;
   domain: DeviceDomain;
   room: string;
-  area_id?: string;
-  area_name?: string;
+  area_id?: string | null;
+  area_name?: string | null;
   type: DeviceDomain;
   enabled: boolean;
   supports_brightness: boolean;
@@ -60,7 +60,7 @@ export interface ControllableDevice {
   brightness?: number;
   capability_source?: CapabilitySource;
   capabilities: DeviceCapability[];
-  risk_level: DeviceRiskLevel;
+  risk_level: DeviceRiskLevel | string;
   stateless?: boolean;
 }
 

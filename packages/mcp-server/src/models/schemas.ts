@@ -18,7 +18,8 @@ export const getDeviceStateInputSchema = z.object({
 });
 
 export const controlDeviceInputSchema = z.object({
-  entity_id: z.string().min(1),
+  entity_id: z.string().min(1).optional(),
+  device_name: z.string().min(1).optional(),
   action: z.enum(['turn_on', 'turn_off', 'press', 'set_brightness', 'set_color_temp', 'set_value', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode']),
   brightness: z.coerce.number().finite().optional(),
   color_temp_kelvin: z.coerce.number().finite().int().min(1000).max(10000).optional(),

@@ -52,60 +52,12 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
         ok: true as const,
         device: {
           ...registryDevice,
+          area_id: registryDevice.area_id ?? undefined,
+          area_name: registryDevice.area_name ?? undefined,
           supports_temperature: true,
-          capabilities: Array.from(new Set([...registryDevice.capabilities, 'set_temperature' as const, 'get_state' as const])),
+          capabilities: Array.from(new Set([...registryDevice.capabilities, 'set_temperature', 'get_state'])) as Array<'get_state' | 'set_temperature'>,
         },
       };
-    }
-
-    const discovered = await haClient.discoverEntities().catch(() => []);
-    const discoveredDevice = discovered.find((device) => device.entity_id === entityId && device.domain === 'climate');
-    if (discoveredDevice) {
-      const device = {
-        device_id: discoveredDevice.device_id ?? entityId,
-        display_name: discoveredDevice.device_name ?? discoveredDevice.friendly_name ?? '5F疗愈空间-空调主机温度控制',
-        aliases: [
-          discoveredDevice.device_name,
-          discoveredDevice.friendly_name,
-          discoveredDevice.area_name,
-          discoveredDevice.device_model,
-          '空调',
-          '温度控制',
-          '空调主机温度控制',
-        ].filter((value): value is string => Boolean(value)),
-        entity_id: discoveredDevice.entity_id,
-        domain: 'climate' as const,
-        room: discoveredDevice.area_name ?? '',
-        type: 'climate' as const,
-        enabled: true,
-        supports_brightness: false,
-        supports_value: false,
-        supports_temperature: true,
-        supports_hvac_mode: (discoveredDevice.hvac_modes?.length ?? 0) > 0 || discoveredDevice.supports_hvac_mode === true,
-        supports_fan_mode: (discoveredDevice.fan_modes?.length ?? 0) > 0 || discoveredDevice.supports_fan_mode === true,
-        supports_swing_mode: (discoveredDevice.swing_modes?.length ?? 0) > 0 || discoveredDevice.supports_swing_mode === true,
-        temperature_min: discoveredDevice.temperature_min,
-        temperature_max: discoveredDevice.temperature_max,
-        temperature_step: discoveredDevice.temperature_step,
-        temperature_unit: discoveredDevice.temperature_unit,
-        current_temperature: discoveredDevice.current_temperature,
-        target_temperature: discoveredDevice.target_temperature,
-        hvac_mode: discoveredDevice.hvac_mode,
-        hvac_modes: discoveredDevice.hvac_modes,
-        fan_mode: discoveredDevice.fan_mode,
-        fan_modes: discoveredDevice.fan_modes,
-        swing_mode: discoveredDevice.swing_mode,
-        swing_modes: discoveredDevice.swing_modes,
-        state: discoveredDevice.state,
-        friendly_name: '5F疗愈空间-空调主机温度控制',
-        supported_color_modes: discoveredDevice.supported_color_modes,
-        capability_source: 'home_assistant' as const,
-        capabilities: ['get_state', 'set_temperature', 'set_hvac_mode', 'set_fan_mode', 'set_swing_mode'],
-        risk_level: 'medium',
-        area_id: discoveredDevice.area_id,
-        area_name: discoveredDevice.area_name,
-      };
-      return { ok: true as const, device };
     }
 
     if (registryDevice) return { ok: false as const, failure: fail('POLICY_DENIED', '该实体不是空调设备', { entity_id: entityId, domain: registryDevice.domain }) };
@@ -116,7 +68,7 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
     async list_climate_devices(input: unknown) {
       const parsed = listClimateDevicesInputSchema.parse(input);
       return ok({
-        devices: registry.list({ room: parsed.room, keyword: parsed.keyword }).filter((device) => device.domain === 'climate'),
+        devices: registry.list({ room: parsed.room, keyword: parsed.keyword, enabledOnly: true }).filter((device) => device.domain === 'climate'),
       });
     },
 
@@ -163,7 +115,7 @@ export const createClimateTools = ({ registry, policy, haClient, auditLogger }: 
       const response = await haClient.setClimateHvacMode(parsed.entity_id, parsed.hvac_mode);
       const state = await haClient.getState(parsed.entity_id);
       const summary = buildStateSummary(state);
-      const confirmed = await waitForExpectedPowerState(() => haClient.getState(parsed.entity_id), parsed.hvac_mode === 'off' ? 'off' : 'on', 3, 300);
+      const confirmed = await waitForExpectedPowerState(() => haClient.getState(parsed.entity_id), parsed.hvac_mode === 'off' ? 'off' : 'on');
       await auditSuccess('set_climate_hvac_mode', { ...parsed, before_state: typeof beforeState.state === 'string' ? beforeState.state : 'unknown' }, parsed.entity_id, summary);
       return ok({ entity_id: parsed.entity_id, action: 'set_hvac_mode', hvac_mode: parsed.hvac_mode, ...summary, state_confirmed: confirmed.confirmed, raw: response });
     },

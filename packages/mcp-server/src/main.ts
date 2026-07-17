@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { auditStore } from './services/audit-store.js';
 import { createServer as createHttpServer } from './server.js';
 import { createRuntime } from './runtime.js';
-import { startMcp, warmMcpDiscoveryCache } from './mcp.js';
+import { startMcp } from './mcp.js';
 import { createMcpHttpRouter } from './mcp-http.js';
 import { syncDeviceRegistryFromHomeAssistant } from './services/device-registry-sync.js';
 
@@ -17,15 +17,12 @@ const boot = async () => {
     try {
       const result = await syncDeviceRegistryFromHomeAssistant(runtime);
       console.log(`ha device registry synced at ${result.synced_at}`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('ha device registry sync failed; using the last local snapshot', error);
     } finally {
       syncInFlight = false;
     }
   };
-  void warmMcpDiscoveryCache(runtime)
-    .then((count) => console.log(`mcp discovery cache warmed with ${count} entities`))
-    .catch((error) => console.error('mcp discovery cache warm failed; will use registry fallback', error));
   void syncHaRegistry();
   const syncTimer = setInterval(() => void syncHaRegistry(), runtime.config.haRegistrySyncIntervalMs);
   syncTimer.unref();
